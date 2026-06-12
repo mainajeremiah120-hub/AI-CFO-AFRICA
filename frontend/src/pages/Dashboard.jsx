@@ -1,4 +1,5 @@
 import MainLayout from '../components/layout/MainLayout';
+import { Link } from 'react-router-dom';
 
 const stats = [
   { label: 'Total Revenue', value: 'KES 0', icon: '📈', color: '#a31b32' },
@@ -20,7 +21,7 @@ export default function Dashboard() {
         style={{ backgroundColor: '#a31b32' }}
       >
         <h2 className="text-xl font-bold">Welcome back, {user?.name} 👋</h2>
-        <p className="text-sm mt-1 opacity-80">{company?.name} — {company?.industry}</p>
+        <p className="text-sm mt-1 opacity-80">{company?.name || 'AI CFO Africa'} {company?.industry ? `— ${company.industry}` : ''}</p>
       </div>
 
       {/* Stats */}
@@ -48,14 +49,15 @@ export default function Dashboard() {
           { label: 'Payroll', desc: 'Employee salaries and payslips', icon: '👥', path: '/payroll' },
           { label: 'Banking', desc: 'M-Pesa and bank reconciliation', icon: '🏦', path: '/banking' },
         ].map((mod) => (
-          <div
+          <Link
             key={mod.label}
-            className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm hover:shadow-md transition cursor-pointer"
+            to={mod.path}
+            className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm hover:shadow-md transition cursor-pointer block"
           >
             <div className="text-2xl mb-3">{mod.icon}</div>
             <p className="font-semibold text-gray-800">{mod.label}</p>
             <p className="text-sm text-gray-400 mt-1">{mod.desc}</p>
-          </div>
+          </Link>
         ))}
       </div>
 

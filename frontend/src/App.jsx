@@ -3,6 +3,8 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Accounting from './pages/Accounting';
+import Receivables from './pages/Receivables';
+
 
 const PrivateRoute = ({ children }) => {
   const token = localStorage.getItem('token');
@@ -21,6 +23,7 @@ export default function App() {
           </PrivateRoute>
         } />
         <Route path="/accounting" element={<PrivateRoute><Accounting /></PrivateRoute>} />
+        <Route path="/receivables" element={<PrivateRoute><Receivables /></PrivateRoute>} />
         <Route path="*" element={<Navigate to="/login" />} />
       </Routes>
     </BrowserRouter>
