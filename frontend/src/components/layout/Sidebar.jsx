@@ -30,7 +30,7 @@ export default function Sidebar({ isOpen, closeSidebar }) {
       <div className="px-6 py-5 border-b border-primary-800 flex justify-between items-center">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center text-sm font-bold">
-            AI
+            ACA
           </div>
           <div>
             <p className="text-sm font-bold text-white">AI CFO Africa</p>

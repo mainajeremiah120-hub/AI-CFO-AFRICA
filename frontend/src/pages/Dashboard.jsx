@@ -18,7 +18,7 @@ export default function Dashboard() {
       {/* Welcome */}
       <div
         className="rounded-2xl p-6 mb-6 text-white"
-        style={{ backgroundColor: '#a31b32' }}
+        style={{ backgroundColor: '#8f182c' }}
       >
         <h2 className="text-xl font-bold">Welcome back, {user?.name} 👋</h2>
         <p className="text-sm mt-1 opacity-80">{company?.name || 'AI CFO Africa'} {company?.industry ? `— ${company.industry}` : ''}</p>

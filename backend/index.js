@@ -9,6 +9,8 @@ import accountingRoutes from './src/modules/accounting/accounting.routes.js';
 import authRoutes from './src/modules/auth/auth.routes.js';
 import receivablesRoutes from './src/modules/receivables/receivables.routes.js';
 import payablesRoutes from './src/modules/payables/payables.routes.js';
+import inventoryRoutes from './src/modules/inventory/inventory.routes.js';
+import payrollRoutes from './src/modules/payroll/payroll.routes.js';
 
 const app = express();
 app.use(cors());
@@ -18,6 +20,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/receivables', receivablesRoutes);
 app.use('/api/payables', payablesRoutes);
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/payroll', payrollRoutes);
 
 import { protect } from './src/middleware/auth.js';
 
