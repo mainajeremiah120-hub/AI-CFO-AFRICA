@@ -4,7 +4,7 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Accounting from './pages/Accounting';
 import Receivables from './pages/Receivables';
-
+import Payables from './pages/Payables';
 
 const PrivateRoute = ({ children }) => {
   const token = localStorage.getItem('token');
@@ -24,6 +24,7 @@ export default function App() {
         } />
         <Route path="/accounting" element={<PrivateRoute><Accounting /></PrivateRoute>} />
         <Route path="/receivables" element={<PrivateRoute><Receivables /></PrivateRoute>} />
+        <Route path="/payables" element={<PrivateRoute><Payables /></PrivateRoute>} />
         <Route path="*" element={<Navigate to="/login" />} />
       </Routes>
     </BrowserRouter>

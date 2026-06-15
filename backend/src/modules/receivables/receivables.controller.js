@@ -144,21 +144,29 @@ export const recordPayment = async (req, res) => {
     await client.query(`UPDATE invoices SET amount_paid = $1, balance_due = $2, status = $3 WHERE id = $4`,
       [new_paid, Number(invoice.total_amount) - new_paid, new_paid >= invoice.total_amount ? 'paid' : 'partial', invoice_id]);
 
-    // Fetch account UUIDs by code
-    const bankAccountRes = await client.query(`SELECT id FROM accounts WHERE code = '1002' AND tenant_id = $1`, [tenantId]);
+    // Fetch account UUIDs — route to correct account based on payment method
+    // cash → 1001 (Cash at Hand), bank/mpesa/cheque → 1002 (Bank Account)
+    const cashAccountCode = payment_method === 'cash' ? '1001' : '1002';
+    const cashAccountRes = await client.query(
+      `SELECT id FROM accounts WHERE code = $1 AND tenant_id = $2`, [cashAccountCode, tenantId]
+    );
     const arAccountRes = await client.query(`SELECT id FROM accounts WHERE code = '1003' AND tenant_id = $1`, [tenantId]);
     
-    if (bankAccountRes.rows.length === 0 || arAccountRes.rows.length === 0) {
-      throw new Error("Required accounting codes (1002 or 1003) are missing from Chart of Accounts.");
+    if (cashAccountRes.rows.length === 0) {
+      throw new Error(`Account ${cashAccountCode} (${payment_method === 'cash' ? 'Cash at Hand' : 'Bank Account'}) is missing from Chart of Accounts.`);
     }
-    const bankAccountId = bankAccountRes.rows[0].id;
+    if (arAccountRes.rows.length === 0) {
+      throw new Error("Account 1003 (Accounts Receivable) is missing from Chart of Accounts.");
+    }
+    const cashAccountId = cashAccountRes.rows[0].id;
     const arAccountId = arAccountRes.rows[0].id;
 
     const entryRes = await client.query(`INSERT INTO journal_entries (tenant_id, date, description, created_by) VALUES ($1, $2, $3, $4) RETURNING id`,
-      [tenantId, payment_date, `Payment for Invoice #${invoice.invoice_number}`, userId]);
+      [tenantId, payment_date, `Payment for Invoice #${invoice.invoice_number} (${payment_method})`, userId]);
+    // Dr Cash/Bank (money received), Cr Accounts Receivable (clears what was owed)
     await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1, $2, $3, 0), ($1, $4, 0, $3)`, 
-        [entryRes.rows[0].id, bankAccountId, amount, arAccountId]);
-    await client.query(`UPDATE accounts SET balance = balance + $1 WHERE id = $2`, [amount, bankAccountId]);
+        [entryRes.rows[0].id, cashAccountId, amount, arAccountId]);
+    await client.query(`UPDATE accounts SET balance = balance + $1 WHERE id = $2`, [amount, cashAccountId]);
     await client.query(`UPDATE accounts SET balance = balance - $1 WHERE id = $2`, [amount, arAccountId]);
 
     await client.query('COMMIT');

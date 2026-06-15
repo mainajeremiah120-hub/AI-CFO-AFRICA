@@ -8,6 +8,7 @@ import './src/config/db.js';
 import accountingRoutes from './src/modules/accounting/accounting.routes.js';
 import authRoutes from './src/modules/auth/auth.routes.js';
 import receivablesRoutes from './src/modules/receivables/receivables.routes.js';
+import payablesRoutes from './src/modules/payables/payables.routes.js';
 
 const app = express();
 app.use(cors());
@@ -16,6 +17,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/receivables', receivablesRoutes);
+app.use('/api/payables', payablesRoutes);
 
 import { protect } from './src/middleware/auth.js';
 
