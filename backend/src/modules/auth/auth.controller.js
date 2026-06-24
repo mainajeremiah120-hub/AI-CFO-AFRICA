@@ -27,13 +27,14 @@ export const register = async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    await sendWelcomeEmail({
+    // Fire-and-forget — don't let email failure break registration
+    sendWelcomeEmail({
       name: user.name,
       email: user.email,
       password,
       companyName: company.name,
       role: user.role,
-    });
+    }).catch(err => console.error('Welcome email failed:', err.message));
 
     res.status(201).json({
       token,
@@ -63,9 +64,14 @@ export const login = async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    const companyResult = await pool.query(
+      `SELECT * FROM companies WHERE id = $1`, [user.tenant_id]
+    );
+
     res.json({
       token,
       user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      company: companyResult.rows[0] || null,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

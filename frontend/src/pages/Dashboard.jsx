@@ -9,8 +9,8 @@ const stats = [
 ];
 
 export default function Dashboard() {
-  const user = JSON.parse(localStorage.getItem('user'));
-  const company = JSON.parse(localStorage.getItem('company'));
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+  const company = JSON.parse(localStorage.getItem('company') || 'null');
 
   return (
     <MainLayout title="Dashboard">

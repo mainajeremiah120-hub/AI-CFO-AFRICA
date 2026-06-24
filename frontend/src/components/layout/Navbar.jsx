@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 
 export default function Navbar({ title, toggleSidebar }) {
-  const user = JSON.parse(localStorage.getItem('user'));
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
   const navigate = useNavigate();
 
   return (

@@ -33,8 +33,8 @@ export default function POS() {
     tax_rate: 16,
   });
 
-  const user = JSON.parse(localStorage.getItem('user'));
-  const company = JSON.parse(localStorage.getItem('company'));
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+  const company = JSON.parse(localStorage.getItem('company') || 'null');
 
   useEffect(() => {
     checkActiveSession();

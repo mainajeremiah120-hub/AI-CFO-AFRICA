@@ -16,7 +16,7 @@ const navItems = [
 export default function Sidebar({ isOpen, closeSidebar }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const company = JSON.parse(localStorage.getItem('company'));
+  const company = JSON.parse(localStorage.getItem('company') || 'null');
 
   const handleLogout = () => {
     localStorage.clear();
