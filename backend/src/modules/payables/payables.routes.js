@@ -2,6 +2,8 @@ import express from 'express';
 import {
   createSupplier,
   getSuppliers,
+  updateSupplier,
+  deleteSupplier,
   createBill,
   getBills,
   getBill,
@@ -18,6 +20,8 @@ router.use(protect);
 // Suppliers
 router.post('/suppliers', createSupplier);
 router.get('/suppliers', getSuppliers);
+router.put('/suppliers/:id', updateSupplier);
+router.delete('/suppliers/:id', deleteSupplier);
 
 // Bills
 router.post('/bills', createBill);

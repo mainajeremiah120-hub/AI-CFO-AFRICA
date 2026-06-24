@@ -2,6 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 const navItems = [
   { label: 'Dashboard', icon: '📊', path: '/dashboard' },
+  { label: 'POS', icon: '🛒', path: '/pos' },
   { label: 'Accounting', icon: '📒', path: '/accounting' },
   { label: 'Receivables', icon: '📥', path: '/receivables' },
   { label: 'Payables', icon: '📤', path: '/payables' },
@@ -10,7 +11,6 @@ const navItems = [
   { label: 'Procurement', icon: '🛒', path: '/procurement' },
   { label: 'Banking', icon: '🏦', path: '/banking' },
   { label: 'Analytics', icon: '📈', path: '/analytics' },
-  { label: 'AI CFO', icon: '🤖', path: '/ai-cfo' },
 ];
 
 export default function Sidebar({ isOpen, closeSidebar }) {

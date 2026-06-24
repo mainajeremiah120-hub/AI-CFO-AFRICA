@@ -2,6 +2,8 @@ import express from 'express';
 import {
   createEmployee,
   getEmployees,
+  updateEmployee,
+  deleteEmployee,
   createPayrollRun,
   getPayrollRuns,
   getPayslips,
@@ -17,6 +19,8 @@ router.use(protect);
 // Employees
 router.post('/employees', createEmployee);
 router.get('/employees', getEmployees);
+router.put('/employees/:id', updateEmployee);
+router.delete('/employees/:id', deleteEmployee);
 
 // Payroll Runs
 router.post('/runs', createPayrollRun);

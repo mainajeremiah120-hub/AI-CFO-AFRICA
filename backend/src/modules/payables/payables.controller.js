@@ -32,6 +32,37 @@ export const getSuppliers = async (req, res) => {
   }
 };
 
+export const updateSupplier = async (req, res) => {
+  const { id } = req.params;
+  const { name, email, phone, address, supplier_type } = req.body;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `UPDATE suppliers SET name=$1, email=$2, phone=$3, address=$4, supplier_type=$5
+       WHERE id=$6 AND tenant_id=$7 RETURNING *`,
+      [name, email, phone, address, supplier_type, id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Supplier not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const deleteSupplier = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  try {
+    await pool.query(
+      `UPDATE suppliers SET is_active=false WHERE id=$1 AND tenant_id=$2`,
+      [id, tenantId]
+    );
+    res.json({ message: 'Supplier deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 // ─── BILLS ───────────────────────────────────────────────
 
 export const createBill = async (req, res) => {

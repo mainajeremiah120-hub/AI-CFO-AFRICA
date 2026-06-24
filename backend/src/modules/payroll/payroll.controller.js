@@ -32,6 +32,37 @@ export const getEmployees = async (req, res) => {
   }
 };
 
+export const updateEmployee = async (req, res) => {
+  const { id } = req.params;
+  const { full_name, email, phone, position, department, basic_salary, bank_account } = req.body;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `UPDATE employees SET full_name=$1, email=$2, phone=$3, position=$4, department=$5, basic_salary=$6, bank_account=$7
+       WHERE id=$8 AND tenant_id=$9 RETURNING *`,
+      [full_name, email, phone, position, department, basic_salary, bank_account, id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Employee not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const deleteEmployee = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  try {
+    await pool.query(
+      `UPDATE employees SET is_active=false WHERE id=$1 AND tenant_id=$2`,
+      [id, tenantId]
+    );
+    res.json({ message: 'Employee deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 // ─── PAYROLL CALCULATION HELPER ──────────────────────────
 
 const calculateDeductions = (basic_salary) => {

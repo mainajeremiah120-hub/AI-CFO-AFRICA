@@ -28,6 +28,37 @@ export const getCustomers = async (req, res) => {
   }
 };
 
+export const updateCustomer = async (req, res) => {
+  const { id } = req.params;
+  const { name, email, phone, address, customer_type } = req.body;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `UPDATE customers SET name=$1, email=$2, phone=$3, address=$4, customer_type=$5
+       WHERE id=$6 AND tenant_id=$7 RETURNING *`,
+      [name, email, phone, address, customer_type, id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Customer not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const deleteCustomer = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  try {
+    await pool.query(
+      `UPDATE customers SET is_active=false WHERE id=$1 AND tenant_id=$2`,
+      [id, tenantId]
+    );
+    res.json({ message: 'Customer deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 // ─── INVOICES ────────────────────────────────────────────
 export const createInvoice = async (req, res) => {
   const { customer_id, invoice_number, date, due_date, items, tax_rate, notes } = req.body;

@@ -50,6 +50,21 @@ export const updateAccount = async (req, res) => {
   }
 };
 
+export const deleteAccount = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `UPDATE accounts SET is_active = false WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+      [id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Account not found' });
+    res.json({ message: 'Account deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 // ─── JOURNAL ENTRIES ────────────────────────────────────
 
 export const createJournalEntry = async (req, res) => {

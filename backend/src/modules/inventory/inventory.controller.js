@@ -33,6 +33,37 @@ export const getWarehouses = async (req, res) => {
 
 // ─── PRODUCTS ────────────────────────────────────────────
 
+export const updateWarehouse = async (req, res) => {
+  const { id } = req.params;
+  const { name, location } = req.body;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `UPDATE warehouses SET name=$1, location=$2 WHERE id=$3 AND tenant_id=$4 RETURNING *`,
+      [name, location, id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Warehouse not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const deleteWarehouse = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `UPDATE warehouses SET is_active=false WHERE id=$1 AND tenant_id=$2 RETURNING *`,
+      [id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Warehouse not found' });
+    res.json({ message: 'Warehouse deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 export const createProduct = async (req, res) => {
   const { sku, name, description, category, unit, cost_price, selling_price, reorder_level } = req.body;
   const { tenantId } = req.user;
@@ -44,6 +75,34 @@ export const createProduct = async (req, res) => {
       [tenantId, sku, name, description, category, unit || 'pcs', cost_price || 0, selling_price || 0, reorder_level || 0]
     );
     res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const updateProduct = async (req, res) => {
+  const { id } = req.params;
+  const { name, description, category, unit, cost_price, selling_price, reorder_level } = req.body;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `UPDATE products SET name=$1, description=$2, category=$3, unit=$4, cost_price=$5, selling_price=$6, reorder_level=$7
+       WHERE id=$8 AND tenant_id=$9 RETURNING *`,
+      [name, description, category, unit, cost_price, selling_price, reorder_level, id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Product not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const deleteProduct = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  try {
+    await pool.query(`DELETE FROM products WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
+    res.json({ message: 'Product deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

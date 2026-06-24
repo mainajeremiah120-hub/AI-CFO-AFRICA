@@ -32,6 +32,34 @@ export const getVendors = async (req, res) => {
   }
 };
 
+export const updateVendor = async (req, res) => {
+  const { id } = req.params;
+  const { name, email, phone, kra_pin, payment_terms } = req.body;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `UPDATE vendors SET name=$1, email=$2, phone=$3, kra_pin=$4, payment_terms=$5
+       WHERE id=$6 AND tenant_id=$7 RETURNING *`,
+      [name, email, phone, kra_pin, payment_terms, id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const deleteVendor = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  try {
+    await pool.query(`DELETE FROM vendors WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
+    res.json({ message: 'Vendor deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 // ─── REQUISITIONS ─────────────────────────────────────────
 
 export const createRequisition = async (req, res) => {

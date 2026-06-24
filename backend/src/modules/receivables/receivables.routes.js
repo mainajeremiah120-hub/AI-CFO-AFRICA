@@ -2,6 +2,8 @@ import express from 'express';
 import {
   createCustomer,
   getCustomers,
+  updateCustomer,
+  deleteCustomer,
   createInvoice,
   getInvoices,
   getInvoice,
@@ -18,6 +20,8 @@ router.use(protect);
 // Customers
 router.post('/customers', createCustomer);
 router.get('/customers', getCustomers);
+router.put('/customers/:id', updateCustomer);
+router.delete('/customers/:id', deleteCustomer);
 
 // Invoices
 router.post('/invoices', createInvoice);

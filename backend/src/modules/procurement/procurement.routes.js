@@ -2,6 +2,8 @@ import express from 'express';
 import {
   createVendor,
   getVendors,
+  updateVendor,
+  deleteVendor,
   createRequisition,
   getRequisitions,
   updateRequisitionStatus,
@@ -22,6 +24,8 @@ router.use(protect);
 // Vendors
 router.post('/vendors', createVendor);
 router.get('/vendors', getVendors);
+router.put('/vendors/:id', updateVendor);
+router.delete('/vendors/:id', deleteVendor);
 
 // Requisitions
 router.post('/requisitions', createRequisition);

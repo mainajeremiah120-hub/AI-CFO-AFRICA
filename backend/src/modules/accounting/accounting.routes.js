@@ -3,6 +3,7 @@ import {
   createAccount,
   getAccounts,
   updateAccount,
+  deleteAccount,
   createJournalEntry,
   getJournalEntries,
   getTrialBalance,
@@ -19,6 +20,7 @@ router.use(protect);
 router.post('/accounts', createAccount);
 router.get('/accounts', getAccounts);
 router.put('/accounts/:id', updateAccount);
+router.delete('/accounts/:id', deleteAccount);
 
 // Journal Entries
 router.post('/journal-entries', createJournalEntry);

@@ -9,6 +9,11 @@ import Inventory from './pages/Inventory';
 import Payroll from './pages/payroll';
 import Procurement from './pages/procurement';
 import Banking from './pages/banking';
+import Analytics from './pages/Analytics';
+import Pos from './pages/Pos';
+import Settings from './pages/Settings';
+
+
 const PrivateRoute = ({ children }) => {
   const token = localStorage.getItem('token');
   return token ? children : <Navigate to="/login" />;
@@ -32,6 +37,9 @@ export default function App() {
         <Route path="/payroll" element={<PrivateRoute><Payroll /></PrivateRoute>} />
         <Route path="/procurement" element={<PrivateRoute><Procurement /></PrivateRoute>} />
         <Route path="/banking" element={<PrivateRoute><Banking /></PrivateRoute>} />
+        <Route path="/analytics" element={<PrivateRoute><Analytics /></PrivateRoute>} />
+        <Route path="/pos" element={<PrivateRoute><Pos /></PrivateRoute>} />
+        <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
         <Route path="*" element={<Navigate to="/login" />} />
       </Routes>
     </BrowserRouter>
