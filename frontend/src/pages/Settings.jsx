@@ -29,6 +29,7 @@ export default function Settings() {
   const [editUser, setEditUser] = useState(null);
   const [editUserForm, setEditUserForm] = useState({ name: '', email: '', role: '', is_active: true });
   const [deleteUserTarget, setDeleteUserTarget] = useState(null);
+  const [userOpLoading, setUserOpLoading] = useState(false);
 
   // Master data
   const [masterTab, setMasterTab] = useState('accounts');
@@ -297,21 +298,21 @@ export default function Settings() {
   };
 
   const handleEditUser = async () => {
-    setLoading(true);
+    setUserOpLoading(true);
     try {
       await API.put(`/settings/users/${editUser.id}`, editUserForm);
       setEditUser(null);
       fetchUsers();
-      showMessage('User updated successfully');
+      showMessage('User updated — notification email sent');
     } catch (err) {
       showMessage(err.response?.data?.error || 'Failed to update user', true);
     } finally {
-      setLoading(false);
+      setUserOpLoading(false);
     }
   };
 
   const handleDeleteUser = async () => {
-    setLoading(true);
+    setUserOpLoading(true);
     try {
       await API.delete(`/settings/users/${deleteUserTarget.id}`);
       setDeleteUserTarget(null);
@@ -320,7 +321,7 @@ export default function Settings() {
     } catch (err) {
       showMessage(err.response?.data?.error || 'Failed to delete user', true);
     } finally {
-      setLoading(false);
+      setUserOpLoading(false);
     }
   };
 
@@ -1222,8 +1223,8 @@ export default function Settings() {
             </div>
             <div className="flex gap-3 mt-5">
               <button onClick={() => setEditUser(null)} className="flex-1 bg-gray-100 text-gray-700 font-medium py-2 rounded-lg text-sm hover:bg-gray-200">Cancel</button>
-              <button onClick={handleEditUser} disabled={loading} className="flex-1 text-white font-medium py-2 rounded-lg text-sm disabled:opacity-50" style={{ backgroundColor: '#a31b32' }}>
-                {loading ? 'Saving...' : 'Save Changes'}
+              <button onClick={handleEditUser} disabled={userOpLoading} className="flex-1 text-white font-medium py-2 rounded-lg text-sm disabled:opacity-50" style={{ backgroundColor: '#a31b32' }}>
+                {userOpLoading ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </div>
@@ -1241,8 +1242,8 @@ export default function Settings() {
             </p>
             <div className="flex gap-3">
               <button onClick={() => setDeleteUserTarget(null)} className="flex-1 bg-gray-100 text-gray-700 font-medium py-2 rounded-lg text-sm hover:bg-gray-200">Cancel</button>
-              <button onClick={handleDeleteUser} disabled={loading} className="flex-1 bg-red-600 text-white font-medium py-2 rounded-lg text-sm hover:bg-red-700 disabled:opacity-50">
-                {loading ? 'Deleting...' : 'Yes, Delete'}
+              <button onClick={handleDeleteUser} disabled={userOpLoading} className="flex-1 bg-red-600 text-white font-medium py-2 rounded-lg text-sm hover:bg-red-700 disabled:opacity-50">
+                {userOpLoading ? 'Deleting...' : 'Yes, Delete'}
               </button>
             </div>
           </div>

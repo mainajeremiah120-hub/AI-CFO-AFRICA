@@ -1,6 +1,6 @@
 import pool from '../../config/db.js';
 import bcrypt from 'bcryptjs';
-import { sendWelcomeEmail } from '../../config/mailer.js';
+import { sendWelcomeEmail, sendUserUpdateEmail } from '../../config/mailer.js';
 
 // ─── COMPANY SETTINGS ────────────────────────────────────
 
@@ -199,13 +199,39 @@ export const updateUserRole = async (req, res) => {
   }
 
   try {
+    // Fetch current user to detect changes
+    const before = await pool.query(
+      `SELECT * FROM users WHERE id=$1 AND tenant_id=$2`, [id, tenantId]
+    );
+    if (before.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    const prev = before.rows[0];
+
     const result = await pool.query(
       `UPDATE users SET role=$1, is_active=$2, name=COALESCE($3, name), email=COALESCE($4, email)
        WHERE id=$5 AND tenant_id=$6 RETURNING id, name, email, role, is_active`,
       [role, is_active, name || null, email || null, id, tenantId]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
-    res.json(result.rows[0]);
+    const updated = result.rows[0];
+
+    // Build list of changes and send email
+    const changes = [];
+    if (name && name !== prev.name) changes.push({ label: 'Name', value: name });
+    if (email && email !== prev.email) changes.push({ label: 'Email', value: email });
+    if (role !== prev.role) changes.push({ label: 'Role', value: role.replace('_', ' ').toUpperCase() });
+    if (is_active !== prev.is_active) changes.push({ label: 'Account Status', value: is_active ? 'Active' : 'Inactive' });
+
+    if (changes.length > 0) {
+      const companyResult = await pool.query(`SELECT name FROM companies WHERE id=$1`, [tenantId]);
+      const companyName = companyResult.rows[0]?.name || 'Your Organization';
+      sendUserUpdateEmail({
+        name: updated.name,
+        email: updated.email,
+        changes,
+        companyName,
+      }).catch(err => console.error('Update email failed:', err.message));
+    }
+
+    res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
