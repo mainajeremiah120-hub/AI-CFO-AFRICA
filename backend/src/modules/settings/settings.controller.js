@@ -1,5 +1,6 @@
 import pool from '../../config/db.js';
 import bcrypt from 'bcryptjs';
+import { sendWelcomeEmail } from '../../config/mailer.js';
 
 // ─── COMPANY SETTINGS ────────────────────────────────────
 
@@ -173,6 +174,15 @@ export const createUser = async (req, res) => {
        VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, role`,
       [tenantId, name, email, password_hash, role || 'accountant']
     );
+
+    const companyResult = await pool.query(
+      `SELECT name FROM companies WHERE id = $1`, [tenantId]
+    );
+    const companyName = companyResult.rows[0]?.name || 'Your Organization';
+
+    sendWelcomeEmail({ name, email, password, companyName, role: role || 'accountant' })
+      .catch(err => console.error('Welcome email failed:', err.message));
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });

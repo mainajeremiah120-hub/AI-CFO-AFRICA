@@ -16,7 +16,8 @@ import Settings from './pages/Settings';
 
 const PrivateRoute = ({ children }) => {
   const token = localStorage.getItem('token');
-  return token ? children : <Navigate to="/login" />;
+  const valid = token && token !== 'undefined' && token !== 'null';
+  return valid ? children : <Navigate to="/login" replace />;
 };
 
 export default function App() {
