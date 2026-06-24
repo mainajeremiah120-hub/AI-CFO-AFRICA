@@ -191,16 +191,41 @@ export const createUser = async (req, res) => {
 
 export const updateUserRole = async (req, res) => {
   const { id } = req.params;
-  const { role, is_active } = req.body;
-  const { tenantId } = req.user;
+  const { role, is_active, name, email } = req.body;
+  const { tenantId, userId } = req.user;
+
+  if (String(id) === String(userId) && is_active === false) {
+    return res.status(400).json({ error: 'You cannot deactivate your own account' });
+  }
 
   try {
     const result = await pool.query(
-      `UPDATE users SET role=$1, is_active=$2 WHERE id=$3 AND tenant_id=$4 RETURNING id, name, email, role, is_active`,
-      [role, is_active, id, tenantId]
+      `UPDATE users SET role=$1, is_active=$2, name=COALESCE($3, name), email=COALESCE($4, email)
+       WHERE id=$5 AND tenant_id=$6 RETURNING id, name, email, role, is_active`,
+      [role, is_active, name || null, email || null, id, tenantId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
     res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const deleteUser = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId, userId } = req.user;
+
+  if (String(id) === String(userId)) {
+    return res.status(400).json({ error: 'You cannot delete your own account' });
+  }
+
+  try {
+    const result = await pool.query(
+      `DELETE FROM users WHERE id=$1 AND tenant_id=$2 RETURNING id`,
+      [id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ message: 'User deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

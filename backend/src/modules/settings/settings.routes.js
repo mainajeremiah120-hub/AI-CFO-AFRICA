@@ -9,6 +9,7 @@ import {
   getUsers,
   createUser,
   updateUserRole,
+  deleteUser,
   resetTransactionData,
 } from './settings.controller.js';
 import { protect } from '../../middleware/auth.js';
@@ -31,6 +32,7 @@ router.put('/password', changePassword);
 router.get('/users', getUsers);
 router.post('/users', createUser);
 router.put('/users/:id', updateUserRole);
+router.delete('/users/:id', deleteUser);
 
 // Data Reset
 router.post('/reset', resetTransactionData);

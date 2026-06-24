@@ -26,6 +26,9 @@ export default function Settings() {
   const [resetConfirm, setResetConfirm] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
   const [users, setUsers] = useState([]);
+  const [editUser, setEditUser] = useState(null);
+  const [editUserForm, setEditUserForm] = useState({ name: '', email: '', role: '', is_active: true });
+  const [deleteUserTarget, setDeleteUserTarget] = useState(null);
 
   // Master data
   const [masterTab, setMasterTab] = useState('accounts');
@@ -288,6 +291,34 @@ export default function Settings() {
       showMessage('Record deleted');
     } catch (err) {
       showMessage(err.response?.data?.error || 'Failed to delete record', true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditUser = async () => {
+    setLoading(true);
+    try {
+      await API.put(`/settings/users/${editUser.id}`, editUserForm);
+      setEditUser(null);
+      fetchUsers();
+      showMessage('User updated successfully');
+    } catch (err) {
+      showMessage(err.response?.data?.error || 'Failed to update user', true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    setLoading(true);
+    try {
+      await API.delete(`/settings/users/${deleteUserTarget.id}`);
+      setDeleteUserTarget(null);
+      fetchUsers();
+      showMessage('User deleted');
+    } catch (err) {
+      showMessage(err.response?.data?.error || 'Failed to delete user', true);
     } finally {
       setLoading(false);
     }
@@ -778,23 +809,25 @@ export default function Settings() {
                       Joined: {new Date(u.created_at).toLocaleDateString()}
                     </p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <select
-                      value={u.role}
-                      onChange={e => handleUpdateUserRole(u.id, e.target.value, u.is_active)}
-                      className="border border-gray-300 rounded-lg px-2 py-1 text-xs focus:outline-none"
-                    >
-                      {ROLES.map(r => (
-                        <option key={r} value={r}>{r.replace('_', ' ').toUpperCase()}</option>
-                      ))}
-                    </select>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs px-3 py-1 rounded-full font-medium ${
+                      u.is_active ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+                    }`}>
+                      {u.role.replace('_', ' ').toUpperCase()}
+                    </span>
                     <button
-                      onClick={() => handleUpdateUserRole(u.id, u.role, !u.is_active)}
-                      className={`text-xs px-3 py-1 rounded-full font-medium ${
-                        u.is_active ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-                      }`}
+                      onClick={() => { setEditUser(u); setEditUserForm({ name: u.name, email: u.email, role: u.role, is_active: u.is_active }); }}
+                      className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                      title="Edit user"
                     >
-                      {u.is_active ? 'Active' : 'Inactive'}
+                      <PencilIcon />
+                    </button>
+                    <button
+                      onClick={() => setDeleteUserTarget(u)}
+                      className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition"
+                      title="Delete user"
+                    >
+                      <TrashIcon />
                     </button>
                   </div>
                 </div>
@@ -1136,6 +1169,80 @@ export default function Settings() {
                 className="flex-1 bg-red-600 text-white font-medium py-2.5 rounded-lg text-sm hover:bg-red-700 disabled:opacity-50"
               >
                 {loading ? 'Resetting...' : 'Yes, Reset Data'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── EDIT USER MODAL ── */}
+      {editUser && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6">
+            <h2 className="text-base font-semibold text-gray-800 mb-4">Edit User</h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Full Name</label>
+                <input
+                  value={editUserForm.name}
+                  onChange={e => setEditUserForm({ ...editUserForm, name: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={editUserForm.email}
+                  onChange={e => setEditUserForm({ ...editUserForm, email: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Role</label>
+                <select
+                  value={editUserForm.role}
+                  onChange={e => setEditUserForm({ ...editUserForm, role: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                >
+                  {ROLES.map(r => <option key={r} value={r}>{r.replace('_', ' ').toUpperCase()}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center justify-between p-3 border border-gray-100 rounded-lg">
+                <span className="text-sm text-gray-700">Account Active</span>
+                <button
+                  type="button"
+                  onClick={() => setEditUserForm({ ...editUserForm, is_active: !editUserForm.is_active })}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${editUserForm.is_active ? '' : 'bg-gray-300'}`}
+                  style={editUserForm.is_active ? { backgroundColor: '#a31b32' } : {}}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${editUserForm.is_active ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => setEditUser(null)} className="flex-1 bg-gray-100 text-gray-700 font-medium py-2 rounded-lg text-sm hover:bg-gray-200">Cancel</button>
+              <button onClick={handleEditUser} disabled={loading} className="flex-1 text-white font-medium py-2 rounded-lg text-sm disabled:opacity-50" style={{ backgroundColor: '#a31b32' }}>
+                {loading ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── DELETE USER MODAL ── */}
+      {deleteUserTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 text-center">
+            <span className="text-4xl">⚠️</span>
+            <h2 className="text-base font-semibold text-gray-800 mt-3 mb-2">Delete User?</h2>
+            <p className="text-sm text-gray-500 mb-5">
+              Are you sure you want to delete <strong>{deleteUserTarget.name}</strong>? This cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteUserTarget(null)} className="flex-1 bg-gray-100 text-gray-700 font-medium py-2 rounded-lg text-sm hover:bg-gray-200">Cancel</button>
+              <button onClick={handleDeleteUser} disabled={loading} className="flex-1 bg-red-600 text-white font-medium py-2 rounded-lg text-sm hover:bg-red-700 disabled:opacity-50">
+                {loading ? 'Deleting...' : 'Yes, Delete'}
               </button>
             </div>
           </div>
