@@ -38,6 +38,10 @@ export default function Procurement() {
   const [products, setProducts] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
 
+  // Edit state
+  const [editingVendorId, setEditingVendorId] = useState(null);
+  const [editingPoId, setEditingPoId] = useState(null);
+
   useEffect(() => {
     fetchSummary();
     fetchVendors();
@@ -129,15 +133,51 @@ export default function Procurement() {
     setLoading(true);
     setError('');
     try {
-      await API.post('/procurement/vendors', vendorForm);
-      setSuccess('Vendor created successfully');
+      if (editingVendorId) {
+        await API.put(`/procurement/vendors/${editingVendorId}`, vendorForm);
+        setSuccess('Vendor updated successfully');
+        setEditingVendorId(null);
+      } else {
+        await API.post('/procurement/vendors', vendorForm);
+        setSuccess('Vendor created successfully');
+      }
       setVendorForm({ name: '', email: '', phone: '', kra_pin: '', payment_terms: 'Net 30' });
       fetchVendors();
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create vendor');
+      setError(err.response?.data?.error || 'Failed to save vendor');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleEditVendor = (v) => {
+    setEditingVendorId(v.id);
+    setVendorForm({ name: v.name, email: v.email || '', phone: v.phone || '', kra_pin: v.kra_pin || '', payment_terms: v.payment_terms || 'Net 30' });
+  };
+
+  const handleDeleteVendor = async (id) => {
+    if (!window.confirm('Delete this vendor?')) return;
+    try {
+      await API.delete(`/procurement/vendors/${id}`);
+      setSuccess('Vendor deleted');
+      fetchVendors();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete vendor');
+    }
+  };
+
+  const handleDeleteRequisition = async (id) => {
+    if (!window.confirm('Delete this requisition?')) return;
+    try {
+      await API.delete(`/procurement/requisitions/${id}`);
+      setSuccess('Requisition deleted');
+      fetchRequisitions();
+      fetchSummary();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete requisition');
     }
   };
 
@@ -211,6 +251,31 @@ export default function Procurement() {
       setError(err.response?.data?.error || 'Failed to create purchase order');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeletePO = async (id) => {
+    if (!window.confirm('Delete this purchase order? This cannot be undone.')) return;
+    try {
+      await API.delete(`/procurement/purchase-orders/${id}`);
+      setSuccess('Purchase order deleted');
+      fetchPurchaseOrders();
+      fetchSummary();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete purchase order');
+    }
+  };
+
+  const handleDeleteGR = async (id) => {
+    if (!window.confirm('Delete this goods received record?')) return;
+    try {
+      await API.delete(`/procurement/goods-received/${id}`);
+      setSuccess('Record deleted');
+      fetchGoodsReceived();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete record');
     }
   };
 
@@ -343,7 +408,9 @@ export default function Procurement() {
       {tab === 'vendors' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-            <h2 className="text-base font-semibold text-gray-800 mb-4">New Vendor</h2>
+            <h2 className="text-base font-semibold text-gray-800 mb-4">
+              {editingVendorId ? 'Edit Vendor' : 'New Vendor'}
+            </h2>
             <form onSubmit={handleCreateVendor} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
@@ -397,14 +464,23 @@ export default function Procurement() {
                   <option value="Prepaid">Prepaid</option>
                 </select>
               </div>
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full text-white font-medium py-2 rounded-lg text-sm transition disabled:opacity-50"
-                style={{ backgroundColor: '#a31b32' }}
-              >
-                {loading ? 'Creating...' : 'Create Vendor'}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 text-white font-medium py-2 rounded-lg text-sm transition disabled:opacity-50"
+                  style={{ backgroundColor: '#a31b32' }}
+                >
+                  {loading ? 'Saving...' : editingVendorId ? 'Update Vendor' : 'Create Vendor'}
+                </button>
+                {editingVendorId && (
+                  <button
+                    type="button"
+                    onClick={() => { setEditingVendorId(null); setVendorForm({ name: '', email: '', phone: '', kra_pin: '', payment_terms: 'Net 30' }); }}
+                    className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >Cancel</button>
+                )}
+              </div>
             </form>
           </div>
 
@@ -419,11 +495,12 @@ export default function Procurement() {
                   <th className="text-left py-2 px-3 text-gray-500 font-medium">Email</th>
                   <th className="text-left py-2 px-3 text-gray-500 font-medium">Phone</th>
                   <th className="text-left py-2 px-3 text-gray-500 font-medium">Terms</th>
+                  <th className="py-2 px-3"></th>
                 </tr>
               </thead>
               <tbody>
                 {vendors.length === 0 ? (
-                  <tr><td colSpan="4" className="text-center py-8 text-gray-400">No vendors yet</td></tr>
+                  <tr><td colSpan="5" className="text-center py-8 text-gray-400">No vendors yet</td></tr>
                 ) : (
                   vendors.map(v => (
                     <tr key={v.id} className="border-b border-gray-50 hover:bg-gray-50">
@@ -434,6 +511,10 @@ export default function Procurement() {
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
                           {v.payment_terms || '—'}
                         </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                        <button onClick={() => handleEditVendor(v)} className="text-xs text-blue-600 hover:text-blue-800 font-medium mr-3">Edit</button>
+                        <button onClick={() => handleDeleteVendor(v.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
                       </td>
                     </tr>
                   ))
@@ -512,24 +593,26 @@ export default function Procurement() {
                       </span>
                     </div>
                     <p className="text-xs text-gray-600 mb-3">{r.description}</p>
-                    {r.status === 'pending' && (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleUpdateRequisitionStatus(r.id, 'approved')}
-                          className="flex-1 text-xs py-1.5 rounded-lg text-white font-medium"
-                          style={{ backgroundColor: '#065f46' }}
-                        >
-                          Approve
-                        </button>
-                        <button
-                          onClick={() => handleUpdateRequisitionStatus(r.id, 'rejected')}
-                          className="flex-1 text-xs py-1.5 rounded-lg text-white font-medium"
-                          style={{ backgroundColor: '#a31b32' }}
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex gap-2">
+                      {r.status === 'pending' && (
+                        <>
+                          <button
+                            onClick={() => handleUpdateRequisitionStatus(r.id, 'approved')}
+                            className="flex-1 text-xs py-1.5 rounded-lg text-white font-medium"
+                            style={{ backgroundColor: '#065f46' }}
+                          >Approve</button>
+                          <button
+                            onClick={() => handleUpdateRequisitionStatus(r.id, 'rejected')}
+                            className="flex-1 text-xs py-1.5 rounded-lg text-white font-medium"
+                            style={{ backgroundColor: '#a31b32' }}
+                          >Reject</button>
+                        </>
+                      )}
+                      <button
+                        onClick={() => handleDeleteRequisition(r.id)}
+                        className="px-3 text-xs py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 font-medium"
+                      >Delete</button>
+                    </div>
                   </div>
                 ))
               )}
@@ -675,7 +758,13 @@ export default function Procurement() {
                         {po.status}
                       </span>
                     </div>
-                    <p className="text-sm font-bold text-gray-800">KES {Number(po.total_amount).toLocaleString()}</p>
+                    <div className="flex justify-between items-center mt-1">
+                      <p className="text-sm font-bold text-gray-800">KES {Number(po.total_amount).toLocaleString()}</p>
+                      <button
+                        onClick={() => handleDeletePO(po.id)}
+                        className="text-xs text-red-500 hover:text-red-700 font-medium"
+                      >Delete</button>
+                    </div>
                   </div>
                 ))
               )}
@@ -809,6 +898,12 @@ export default function Procurement() {
                     </div>
                     {gr.received_by && <p className="text-xs text-gray-500 mt-1">Received by: {gr.received_by}</p>}
                     {gr.notes && <p className="text-xs text-gray-400 mt-1">{gr.notes}</p>}
+                    <div className="mt-2 pt-2 border-t border-gray-50">
+                      <button
+                        onClick={() => handleDeleteGR(gr.id)}
+                        className="text-xs text-red-500 hover:text-red-700 font-medium"
+                      >Delete</button>
+                    </div>
                   </div>
                 ))
               )}
