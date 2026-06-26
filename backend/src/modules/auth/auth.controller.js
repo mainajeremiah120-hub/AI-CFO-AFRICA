@@ -3,6 +3,32 @@ import jwt from 'jsonwebtoken';
 import pool from '../../config/db.js';
 import { sendWelcomeEmail } from '../../config/mailer.js';
 
+const DEFAULT_ACCOUNTS = [
+  { code: '1000', name: 'Owner injection Capital',  type: 'equity' },
+  { code: '1001', name: 'Cash at Hand',              type: 'asset' },
+  { code: '1002', name: 'Bank Account',              type: 'asset' },
+  { code: '1003', name: 'Receivable Account',        type: 'asset' },
+  { code: '1004', name: 'Payable-Account',           type: 'liability' },
+  { code: '1005', name: 'Inventory',                 type: 'asset' },
+  { code: '4001', name: 'Sales Revenue',             type: 'revenue' },
+  { code: '4002', name: 'Service Revenue',           type: 'revenue' },
+  { code: '5001', name: 'General Expenses',          type: 'expense' },
+  { code: '5002', name: 'Salary Expense',            type: 'expense' },
+  { code: '5003', name: 'Cost of Goods Sold',        type: 'expense' },
+];
+
+export const seedAccounts = async (tenantId, client) => {
+  const db = client || pool;
+  for (const acc of DEFAULT_ACCOUNTS) {
+    await db.query(
+      `INSERT INTO accounts (tenant_id, code, name, type, balance, is_active)
+       VALUES ($1, $2, $3, $4, 0, true)
+       ON CONFLICT (tenant_id, code) DO NOTHING`,
+      [tenantId, acc.code, acc.name, acc.type]
+    );
+  }
+};
+
 export const register = async (req, res) => {
   const { companyName, industry, name, email, password } = req.body;
 
@@ -20,6 +46,9 @@ export const register = async (req, res) => {
       [company.id, name, email, password_hash, 'admin']
     );
     const user = userResult.rows[0];
+
+    // Seed default chart of accounts for every new tenant
+    await seedAccounts(company.id);
 
     const token = jwt.sign(
       { userId: user.id, tenantId: company.id, role: user.role },

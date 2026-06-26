@@ -37,4 +37,14 @@ router.delete('/users/:id', deleteUser);
 // Data Reset
 router.post('/reset', resetTransactionData);
 
+// Seed default accounts for existing tenants
+router.post('/seed-accounts', async (req, res) => {
+  try {
+    await seedAccounts(req.user.tenantId);
+    res.json({ message: 'Default accounts seeded successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

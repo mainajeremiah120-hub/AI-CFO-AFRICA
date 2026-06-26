@@ -41,7 +41,14 @@ export default function Accounting() {
   const fetchAccounts = async () => {
     try {
       const res = await API.get('/accounting/accounts');
-      setAccounts(res.data);
+      if (res.data.length === 0) {
+        // Auto-seed default chart of accounts for this tenant
+        await API.post('/settings/seed-accounts');
+        const seeded = await API.get('/accounting/accounts');
+        setAccounts(seeded.data);
+      } else {
+        setAccounts(res.data);
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to fetch accounts');
     }

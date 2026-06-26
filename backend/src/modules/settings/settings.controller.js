@@ -1,6 +1,7 @@
 import pool from '../../config/db.js';
 import bcrypt from 'bcryptjs';
 import { sendWelcomeEmail, sendUserUpdateEmail } from '../../config/mailer.js';
+import { seedAccounts } from '../auth/auth.controller.js';
 
 // ─── COMPANY SETTINGS ────────────────────────────────────
 
@@ -246,11 +247,20 @@ export const deleteUser = async (req, res) => {
   }
 
   try {
-    const result = await pool.query(
-      `DELETE FROM users WHERE id=$1 AND tenant_id=$2 RETURNING id`,
-      [id, tenantId]
+    // Verify the user belongs to this tenant first
+    const check = await pool.query(
+      `SELECT id, tenant_id FROM users WHERE id=$1`, [id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (String(check.rows[0].tenant_id) !== String(tenantId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    await pool.query(`DELETE FROM users WHERE id=$1`, [id]);
     res.json({ message: 'User deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -301,6 +311,10 @@ export const resetTransactionData = async (req, res) => {
     await client.query(`UPDATE accounts SET balance = 0 WHERE tenant_id = $1`, [tenantId]);
 
     await client.query('COMMIT');
+
+    // Re-seed default accounts in case any were deleted
+    await seedAccounts(tenantId);
+
     res.json({ message: 'Transaction data cleared successfully. Accounts and settings preserved.' });
   } catch (err) {
     await client.query('ROLLBACK');
