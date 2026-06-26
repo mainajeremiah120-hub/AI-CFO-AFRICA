@@ -1,5 +1,53 @@
 import pool from '../../config/db.js';
 
+// Fix auto-created bills whose supplier_id points at vendors instead of suppliers.
+// Runs once at startup; safe to repeat.
+const reconcileAutoCreatedBills = async () => {
+  try {
+    // Find bills where the supplier_id has no matching row in suppliers
+    const broken = await pool.query(`
+      SELECT b.id, b.tenant_id, b.bill_number, b.supplier_id
+      FROM bills b
+      LEFT JOIN suppliers s ON s.id = b.supplier_id AND s.tenant_id = b.tenant_id
+      WHERE b.bill_number LIKE 'BILL-%' AND s.id IS NULL AND b.supplier_id IS NOT NULL
+    `);
+
+    for (const bill of broken.rows) {
+      // Derive PO number: "BILL-PO-2025-001" → "PO-2025-001"
+      const poNumber = bill.bill_number.replace(/^BILL-/, '');
+      const poRow = await pool.query(
+        `SELECT po.vendor_id, v.name, v.email, v.phone
+         FROM purchase_orders po
+         LEFT JOIN vendors v ON v.id = po.vendor_id
+         WHERE po.po_number = $1 AND po.tenant_id = $2 LIMIT 1`,
+        [poNumber, bill.tenant_id]
+      );
+      if (!poRow.rows[0]?.name) continue;
+
+      const { name, email, phone } = poRow.rows[0];
+      let supplierId;
+      const existing = await pool.query(
+        `SELECT id FROM suppliers WHERE tenant_id=$1 AND LOWER(name)=LOWER($2) AND is_active=true LIMIT 1`,
+        [bill.tenant_id, name]
+      );
+      if (existing.rows.length > 0) {
+        supplierId = existing.rows[0].id;
+      } else {
+        const created = await pool.query(
+          `INSERT INTO suppliers (tenant_id, name, email, phone, supplier_type, is_active)
+           VALUES ($1,$2,$3,$4,'company',true) RETURNING id`,
+          [bill.tenant_id, name, email || null, phone || null]
+        );
+        supplierId = created.rows[0].id;
+      }
+      await pool.query(`UPDATE bills SET supplier_id=$1 WHERE id=$2`, [supplierId, bill.id]);
+    }
+  } catch (e) {
+    console.error('reconcileAutoCreatedBills:', e.message);
+  }
+};
+reconcileAutoCreatedBills();
+
 // ─── VENDORS ─────────────────────────────────────────────
 
 export const createVendor = async (req, res) => {
@@ -185,9 +233,11 @@ export const receiveGoods = async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Check PO exists
+    // Check PO exists — fetch full vendor details so we can mirror to suppliers
     const poResult = await client.query(
-      `SELECT po.*, v.name as vendor_name FROM purchase_orders po
+      `SELECT po.*, v.name as vendor_name, v.email as vendor_email,
+              v.phone as vendor_phone, v.kra_pin as vendor_kra_pin
+       FROM purchase_orders po
        LEFT JOIN vendors v ON po.vendor_id = v.id
        WHERE po.id = $1 AND po.tenant_id = $2`,
       [po_id, tenantId]
@@ -243,12 +293,32 @@ export const receiveGoods = async (req, res) => {
     }
 
     // ─── WIRE TO PAYABLES (Auto-create bill) ─────────────────
+    // bills.supplier_id references the suppliers table, not vendors.
+    // Find or auto-create a matching suppliers record so the bill shows the real name.
+    let supplierId = null;
+    if (po.vendor_name) {
+      const existingSupplier = await client.query(
+        `SELECT id FROM suppliers
+         WHERE tenant_id=$1 AND LOWER(name)=LOWER($2) AND is_active=true LIMIT 1`,
+        [tenantId, po.vendor_name]
+      );
+      if (existingSupplier.rows.length > 0) {
+        supplierId = existingSupplier.rows[0].id;
+      } else {
+        const newSupplier = await client.query(
+          `INSERT INTO suppliers (tenant_id, name, email, phone, supplier_type, is_active)
+           VALUES ($1, $2, $3, $4, 'company', true) RETURNING id`,
+          [tenantId, po.vendor_name, po.vendor_email || null, po.vendor_phone || null]
+        );
+        supplierId = newSupplier.rows[0].id;
+      }
+    }
+
     const billResult = await client.query(
       `INSERT INTO bills (tenant_id, supplier_id, bill_number, date, due_date, subtotal, tax_rate, tax_amount, total_amount, balance_due, notes, created_by)
-       SELECT $1, v.id, $2, CURRENT_DATE, CURRENT_DATE + INTERVAL '30 days', $3, 0, 0, $3, $3, $4, $5
-       FROM vendors v WHERE v.id = $6 AND v.tenant_id = $1
+       VALUES ($1, $2, $3, CURRENT_DATE, CURRENT_DATE + INTERVAL '30 days', $4, 0, 0, $4, $4, $5, $6)
        RETURNING *`,
-      [tenantId, `BILL-${po.po_number}`, po.total_amount, `Auto-generated from PO ${po.po_number}`, userId, po.vendor_id]
+      [tenantId, supplierId, `BILL-${po.po_number}`, po.total_amount, `Auto-generated from PO ${po.po_number}`, userId]
     );
 
     // ─── WIRE TO ACCOUNTING (Journal Entry) ──────────────────
