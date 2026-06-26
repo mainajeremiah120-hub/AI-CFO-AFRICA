@@ -138,19 +138,10 @@ export const getBills = async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT b.*, s.name as supplier_name, s.email as supplier_email,
-        json_agg(json_build_object(
-          'id', bi.id,
-          'description', bi.description,
-          'quantity', bi.quantity,
-          'unit_price', bi.unit_price,
-          'total', bi.total
-        )) as items
+      `SELECT b.*, s.name as supplier_name, s.email as supplier_email
        FROM bills b
        LEFT JOIN suppliers s ON b.supplier_id = s.id
-       LEFT JOIN bill_items bi ON b.id = bi.bill_id
        WHERE b.tenant_id = $1
-       GROUP BY b.id, s.name, s.email
        ORDER BY b.created_at DESC`,
       [tenantId]
     );

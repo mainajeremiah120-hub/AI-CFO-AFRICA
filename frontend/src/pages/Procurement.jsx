@@ -35,6 +35,8 @@ export default function Procurement() {
   const [grForm, setGrForm] = useState({
     po_id: '', received_by: '', notes: '', items: []
   });
+  const [products, setProducts] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
 
   useEffect(() => {
     fetchSummary();
@@ -46,7 +48,7 @@ export default function Procurement() {
     if (tab === 'vendors') fetchVendors();
     if (tab === 'requisitions') fetchRequisitions();
     if (tab === 'orders') fetchPurchaseOrders();
-    if (tab === 'receiving') fetchGoodsReceived();
+    if (tab === 'receiving') { fetchGoodsReceived(); fetchProducts(); fetchWarehouses(); }
   }, [tab]);
 
   const fetchSummary = async () => {
@@ -92,6 +94,34 @@ export default function Procurement() {
     } catch (err) {
       setError('Failed to load goods received');
     }
+  };
+
+  const fetchProducts = async () => {
+    try {
+      const res = await API.get('/inventory/products');
+      setProducts(res.data);
+    } catch (err) {}
+  };
+
+  const fetchWarehouses = async () => {
+    try {
+      const res = await API.get('/inventory/warehouses');
+      setWarehouses(res.data);
+    } catch (err) {}
+  };
+
+  const handlePoSelect = (poId) => {
+    const selected = purchaseOrders.find(po => String(po.id) === String(poId));
+    const items = (selected?.items || [])
+      .filter(i => i && i.item_name)
+      .map(i => ({ item_name: i.item_name, quantity: i.quantity, product_id: '', warehouse_id: '' }));
+    setGrForm({ ...grForm, po_id: poId, items });
+  };
+
+  const updateGrItem = (index, field, value) => {
+    const updated = [...grForm.items];
+    updated[index][field] = value;
+    setGrForm({ ...grForm, items: updated });
   };
 
   const handleCreateVendor = async (e) => {
@@ -194,6 +224,7 @@ export default function Procurement() {
       setGrForm({ po_id: '', received_by: '', notes: '', items: [] });
       fetchGoodsReceived();
       fetchPurchaseOrders();
+      fetchProducts();
       fetchSummary();
       setTimeout(() => setSuccess(''), 4000);
     } catch (err) {
@@ -663,7 +694,7 @@ export default function Procurement() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Order</label>
                 <select
                   value={grForm.po_id}
-                  onChange={e => setGrForm({ ...grForm, po_id: e.target.value })}
+                  onChange={e => handlePoSelect(e.target.value)}
                   required
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
@@ -698,9 +729,51 @@ export default function Procurement() {
                 />
               </div>
 
+              {grForm.items.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium text-gray-700 mb-2">Map Items to Inventory</p>
+                  <div className="space-y-3">
+                    {grForm.items.map((item, idx) => (
+                      <div key={idx} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                        <p className="text-xs font-semibold text-gray-700 mb-2">
+                          {item.item_name} <span className="text-gray-400 font-normal">× {item.quantity}</span>
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Product</label>
+                            <select
+                              value={item.product_id}
+                              onChange={e => updateGrItem(idx, 'product_id', e.target.value)}
+                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary-500"
+                            >
+                              <option value="">— select product —</option>
+                              {products.map(p => (
+                                <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Warehouse</label>
+                            <select
+                              value={item.warehouse_id}
+                              onChange={e => updateGrItem(idx, 'warehouse_id', e.target.value)}
+                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary-500"
+                            >
+                              <option value="">— select warehouse —</option>
+                              {warehouses.map(w => (
+                                <option key={w.id} value={w.id}>{w.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
                 <p className="text-xs text-blue-700 font-medium">Auto-wired on receipt:</p>
-                <p className="text-xs text-blue-600 mt-1">✅ Inventory stock updated automatically</p>
+                <p className="text-xs text-blue-600 mt-1">✅ Inventory stock updated for mapped items</p>
                 <p className="text-xs text-blue-600">✅ Bill created in Payables automatically</p>
                 <p className="text-xs text-blue-600">✅ Journal entry posted to Accounting</p>
               </div>

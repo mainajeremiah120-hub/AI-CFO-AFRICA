@@ -130,9 +130,11 @@ export const getInvoices = async (req, res) => {
   const { tenantId } = req.user;
   try {
     const result = await pool.query(
-      `SELECT i.*, c.name as customer_name, json_agg(json_build_object('id', ii.id, 'description', ii.description, 'quantity', ii.quantity, 'unit_price', ii.unit_price, 'total', ii.total)) as items
-       FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id LEFT JOIN invoice_items ii ON i.id = ii.invoice_id
-       WHERE i.tenant_id = $1 GROUP BY i.id, c.name ORDER BY i.created_at DESC`,
+      `SELECT i.*, c.name as customer_name
+       FROM invoices i
+       LEFT JOIN customers c ON i.customer_id = c.id
+       WHERE i.tenant_id = $1
+       ORDER BY i.created_at DESC`,
       [tenantId]
     );
     res.json(result.rows);
