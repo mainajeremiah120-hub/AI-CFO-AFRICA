@@ -97,10 +97,10 @@ export const createInvoice = async (req, res) => {
 
     // Fetch account UUIDs by code
     const arAccountRes = await client.query(`SELECT id FROM accounts WHERE code = '1003' AND tenant_id = $1`, [tenantId]);
-    const salesAccountRes = await client.query(`SELECT id FROM accounts WHERE code = '4001' AND tenant_id = $1`, [tenantId]);
-    
+    const salesAccountRes = await client.query(`SELECT id FROM accounts WHERE code = '4002' AND tenant_id = $1`, [tenantId]);
+
     if (arAccountRes.rows.length === 0 || salesAccountRes.rows.length === 0) {
-      throw new Error("Required accounting codes (1003 or 4001) are missing from Chart of Accounts.");
+      throw new Error("Required accounting codes (1003 or 4002) are missing from Chart of Accounts.");
     }
     const arAccountId = arAccountRes.rows[0].id;
     const salesAccountId = salesAccountRes.rows[0].id;
