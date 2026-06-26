@@ -22,8 +22,10 @@ export const seedAccounts = async (tenantId, client) => {
   for (const acc of DEFAULT_ACCOUNTS) {
     await db.query(
       `INSERT INTO accounts (tenant_id, code, name, type, balance, is_active)
-       VALUES ($1, $2, $3, $4, 0, true)
-       ON CONFLICT (tenant_id, code) DO NOTHING`,
+       SELECT $1, $2, $3, $4, 0, true
+       WHERE NOT EXISTS (
+         SELECT 1 FROM accounts WHERE tenant_id = $1 AND code = $2
+       )`,
       [tenantId, acc.code, acc.name, acc.type]
     );
   }
