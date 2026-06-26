@@ -195,11 +195,15 @@ export const getPayrollRuns = async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT pr.*,
-              COALESCE(SUM(ps.paye),0)             AS total_paye,
-              COALESCE(SUM(ps.nssf),0)             AS total_nssf,
-              COALESCE(SUM(ps.nhif),0)             AS total_nhif,
-              COALESCE(SUM(ps.other_deductions),0) AS total_housing,
-              COUNT(ps.id)                         AS employee_count
+              COALESCE(SUM(ps.paye),0)  AS total_paye,
+              COALESCE(SUM(ps.nssf),0)  AS total_nssf,
+              COALESCE(SUM(ps.nhif),0)  AS total_nhif,
+              COALESCE(SUM(
+                CASE WHEN ps.other_deductions = 0
+                     THEN ROUND(ps.gross_pay::NUMERIC * 0.015)
+                     ELSE ps.other_deductions END
+              ),0)                      AS total_housing,
+              COUNT(ps.id)              AS employee_count
        FROM payroll_runs pr
        LEFT JOIN payslips ps ON ps.payroll_run_id = pr.id
        WHERE pr.tenant_id = $1
@@ -320,12 +324,17 @@ export const getPayrollSummary = async (req, res) => {
       ),
       pool.query(
         `SELECT
-           COALESCE(SUM(ps.paye),0)             AS ytd_paye,
-           COALESCE(SUM(ps.nssf),0)             AS ytd_nssf,
-           COALESCE(SUM(ps.nhif),0)             AS ytd_nhif,
-           COALESCE(SUM(ps.other_deductions),0) AS ytd_housing,
-           COALESCE(SUM(ps.net_pay),0)          AS ytd_net,
-           COALESCE(SUM(ps.gross_pay),0)        AS ytd_gross
+           COALESCE(SUM(ps.paye),0)  AS ytd_paye,
+           COALESCE(SUM(ps.nssf),0)  AS ytd_nssf,
+           COALESCE(SUM(ps.nhif),0)  AS ytd_nhif,
+           COALESCE(SUM(
+             CASE WHEN ps.other_deductions = 0
+                  THEN ROUND(ps.gross_pay::NUMERIC * 0.015)
+                  ELSE ps.other_deductions END
+           ),0)                      AS ytd_housing,
+           COALESCE(SUM(ps.net_pay - CASE WHEN ps.other_deductions = 0
+                  THEN ROUND(ps.gross_pay::NUMERIC * 0.015) ELSE 0 END),0) AS ytd_net,
+           COALESCE(SUM(ps.gross_pay),0) AS ytd_gross
          FROM payslips ps
          JOIN payroll_runs pr ON ps.payroll_run_id = pr.id
          WHERE ps.tenant_id=$1 AND pr.status='processed'
@@ -336,10 +345,14 @@ export const getPayrollSummary = async (req, res) => {
 
     const lastRun = (await pool.query(
       `SELECT pr.*,
-              COALESCE(SUM(ps.paye),0)             AS total_paye,
-              COALESCE(SUM(ps.nssf),0)             AS total_nssf,
-              COALESCE(SUM(ps.nhif),0)             AS total_nhif,
-              COALESCE(SUM(ps.other_deductions),0) AS total_housing
+              COALESCE(SUM(ps.paye),0)  AS total_paye,
+              COALESCE(SUM(ps.nssf),0)  AS total_nssf,
+              COALESCE(SUM(ps.nhif),0)  AS total_nhif,
+              COALESCE(SUM(
+                CASE WHEN ps.other_deductions = 0
+                     THEN ROUND(ps.gross_pay::NUMERIC * 0.015)
+                     ELSE ps.other_deductions END
+              ),0)                      AS total_housing
        FROM payroll_runs pr
        LEFT JOIN payslips ps ON ps.payroll_run_id=pr.id
        WHERE pr.tenant_id=$1
