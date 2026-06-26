@@ -290,3 +290,23 @@ export const getPayrollSummary = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+// ─── PAYROLL RUN DELETE ──────────────────────────────────
+export const deletePayrollRun = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const run = (await client.query(`SELECT id FROM payroll_runs WHERE id=$1 AND tenant_id=$2`, [id, tenantId])).rows[0];
+    if (!run) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Payroll run not found' }); }
+    await client.query(`DELETE FROM payslips WHERE payroll_run_id=$1`, [id]);
+    await client.query(`DELETE FROM payroll_runs WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
+    await client.query('COMMIT');
+    res.json({ message: 'Payroll run deleted' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+};

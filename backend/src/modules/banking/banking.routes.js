@@ -1,34 +1,28 @@
 import express from 'express';
 import {
-  createBankAccount,
-  getBankAccounts,
-  createTransaction,
-  getTransactions,
-  reconcileTransaction,
-  createMpesaTransaction,
-  getMpesaTransactions,
+  createBankAccount, getBankAccounts,
+  createTransaction, getTransactions, reconcileTransaction, updateTransaction, deleteTransaction,
+  createMpesaTransaction, getMpesaTransactions, deleteMpesaTransaction,
   getBankingSummary,
 } from './banking.controller.js';
 import { protect } from '../../middleware/auth.js';
 
 const router = express.Router();
-
 router.use(protect);
 
-// Bank Accounts
 router.post('/accounts', createBankAccount);
 router.get('/accounts', getBankAccounts);
 
-// Transactions
 router.post('/transactions', createTransaction);
 router.get('/transactions', getTransactions);
+router.put('/transactions/:id', updateTransaction);
 router.put('/transactions/:id/reconcile', reconcileTransaction);
+router.delete('/transactions/:id', deleteTransaction);
 
-// M-Pesa
 router.post('/mpesa', createMpesaTransaction);
 router.get('/mpesa', getMpesaTransactions);
+router.delete('/mpesa/:id', deleteMpesaTransaction);
 
-// Summary
 router.get('/summary', getBankingSummary);
 
 export default router;

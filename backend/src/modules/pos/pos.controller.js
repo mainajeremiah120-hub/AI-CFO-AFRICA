@@ -402,3 +402,23 @@ export const getPOSSummary = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+// ─── SALE DELETE ─────────────────────────────────────────
+export const deleteSale = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const sale = (await client.query(`SELECT id FROM pos_sales WHERE id=$1 AND tenant_id=$2`, [id, tenantId])).rows[0];
+    if (!sale) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Sale not found' }); }
+    await client.query(`DELETE FROM pos_sale_items WHERE sale_id=$1`, [id]);
+    await client.query(`DELETE FROM pos_sales WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
+    await client.query('COMMIT');
+    res.json({ message: 'Sale deleted' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+};

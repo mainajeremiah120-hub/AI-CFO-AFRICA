@@ -389,3 +389,75 @@ export const getProcurementSummary = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+// ─── TRANSACTION DELETE / UPDATE ─────────────────────────
+export const deleteRequisition = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(`DELETE FROM requisitions WHERE id=$1 AND tenant_id=$2 RETURNING id`, [id, tenantId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Requisition not found' });
+    res.json({ message: 'Requisition deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const updatePurchaseOrder = async (req, res) => {
+  const { id } = req.params;
+  const { status, notes } = req.body;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `UPDATE purchase_orders SET status=COALESCE($1,status) WHERE id=$2 AND tenant_id=$3 RETURNING *`,
+      [status || null, id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Purchase order not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const deletePurchaseOrder = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const po = (await client.query(`SELECT id FROM purchase_orders WHERE id=$1 AND tenant_id=$2`, [id, tenantId])).rows[0];
+    if (!po) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Purchase order not found' }); }
+    await client.query(`DELETE FROM po_items WHERE po_id=$1`, [id]);
+    await client.query(`DELETE FROM purchase_orders WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
+    await client.query('COMMIT');
+    res.json({ message: 'Purchase order deleted' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+};
+
+export const deleteGoodsReceived = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(`DELETE FROM goods_received WHERE id=$1 AND tenant_id=$2 RETURNING id`, [id, tenantId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Record not found' });
+    res.json({ message: 'Goods received record deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const deleteVendorInvoice = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(`DELETE FROM vendor_invoices WHERE id=$1 AND tenant_id=$2 RETURNING id`, [id, tenantId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Vendor invoice not found' });
+    res.json({ message: 'Vendor invoice deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

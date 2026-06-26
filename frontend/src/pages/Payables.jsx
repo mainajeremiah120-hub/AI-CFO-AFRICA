@@ -29,7 +29,7 @@ export default function Payables() {
     due_date: '',
     tax_rate: 0,
     notes: '',
-    items: [{ description: '', quantity: 1, unit_price: 0 }]
+    items: [{ description: '', quantity: '', unit_price: '' }]
   });
 
   // Payment form
@@ -126,7 +126,7 @@ export default function Payables() {
   // ── BILL handlers ──
   const updateItem = (index, field, value) => {
     const updated = [...billForm.items];
-    updated[index][field] = field === 'description' ? value : Number(value);
+    updated[index][field] = value; // keep as raw string so '' shows as empty placeholder
     setBillForm({ ...billForm, items: updated });
   };
 
@@ -139,7 +139,7 @@ export default function Payables() {
     setBillForm({ ...billForm, items: billForm.items.filter((_, i) => i !== index) });
   };
 
-  const subtotal = billForm.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+  const subtotal = billForm.items.reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)), 0);
   const taxAmount = (subtotal * billForm.tax_rate) / 100;
   const totalAmount = subtotal + taxAmount;
 
@@ -150,7 +150,7 @@ export default function Payables() {
     due_date: '',
     tax_rate: 0,
     notes: '',
-    items: [{ description: '', quantity: 1, unit_price: 0 }]
+    items: [{ description: '', quantity: '', unit_price: '' }]
   });
 
   const handleSaveBill = async (e) => {

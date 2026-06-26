@@ -291,3 +291,15 @@ export const getInventorySummary = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+// ─── STOCK MOVEMENT DELETE ───────────────────────────────
+export const deleteStockMovement = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(`DELETE FROM stock_movements WHERE id=$1 AND tenant_id=$2 RETURNING id`, [id, tenantId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Movement not found' });
+    res.json({ message: 'Stock movement deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

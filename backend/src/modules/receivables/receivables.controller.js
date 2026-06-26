@@ -243,3 +243,91 @@ export const getARSummary = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+// ─── INVOICE EDIT / DELETE ───────────────────────────────
+export const updateInvoice = async (req, res) => {
+  const { id } = req.params;
+  const { due_date, notes, status } = req.body;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `UPDATE invoices SET
+         due_date  = COALESCE($1, due_date),
+         notes     = COALESCE($2, notes),
+         status    = COALESCE($3, status)
+       WHERE id=$4 AND tenant_id=$5 RETURNING *`,
+      [due_date || null, notes ?? null, status || null, id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Invoice not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const deleteInvoice = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const inv = (await client.query(`SELECT * FROM invoices WHERE id=$1 AND tenant_id=$2`, [id, tenantId])).rows[0];
+    if (!inv) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Invoice not found' }); }
+
+    // Reverse journal entry by description match
+    const entries = await client.query(
+      `SELECT id FROM journal_entries WHERE description=$1 AND tenant_id=$2`,
+      [`Invoice #${inv.invoice_number}`, tenantId]
+    );
+    for (const entry of entries.rows) {
+      const lines = (await client.query(`SELECT * FROM journal_lines WHERE journal_entry_id=$1`, [entry.id])).rows;
+      for (const l of lines) {
+        await client.query(`UPDATE accounts SET balance = balance - $1 + $2 WHERE id=$3`, [l.debit, l.credit, l.account_id]);
+      }
+      await client.query(`DELETE FROM journal_lines WHERE journal_entry_id=$1`, [entry.id]);
+      await client.query(`DELETE FROM journal_entries WHERE id=$1`, [entry.id]);
+    }
+
+    await client.query(`DELETE FROM payments WHERE invoice_id=$1`, [id]);
+    await client.query(`DELETE FROM invoice_items WHERE invoice_id=$1`, [id]);
+    await client.query(`DELETE FROM invoices WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
+    await client.query('COMMIT');
+    res.json({ message: 'Invoice deleted' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+};
+
+// ─── PAYMENT DELETE ──────────────────────────────────────
+export const deletePayment = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const pay = (await client.query(`SELECT * FROM payments WHERE id=$1 AND tenant_id=$2`, [id, tenantId])).rows[0];
+    if (!pay) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Payment not found' }); }
+
+    // Restore invoice balance
+    const inv = (await client.query(`SELECT * FROM invoices WHERE id=$1`, [pay.invoice_id])).rows[0];
+    if (inv) {
+      const newPaid = Math.max(0, Number(inv.amount_paid) - Number(pay.amount));
+      const newBal  = Number(inv.total_amount) - newPaid;
+      await client.query(
+        `UPDATE invoices SET amount_paid=$1, balance_due=$2, status=$3 WHERE id=$4`,
+        [newPaid, newBal, newPaid <= 0 ? 'unpaid' : 'partial', pay.invoice_id]
+      );
+    }
+
+    await client.query(`DELETE FROM payments WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
+    await client.query('COMMIT');
+    res.json({ message: 'Payment deleted' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+};

@@ -316,3 +316,56 @@ export const getBankingSummary = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+// ─── TRANSACTION EDIT / DELETE ───────────────────────────
+export const updateTransaction = async (req, res) => {
+  const { id } = req.params;
+  const { description, reference } = req.body;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `UPDATE bank_transactions SET
+         description = COALESCE($1, description),
+         reference   = COALESCE($2, reference)
+       WHERE id=$3 AND tenant_id=$4 RETURNING *`,
+      [description || null, reference || null, id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Transaction not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const deleteTransaction = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const tx = (await client.query(`SELECT * FROM bank_transactions WHERE id=$1 AND tenant_id=$2`, [id, tenantId])).rows[0];
+    if (!tx) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Transaction not found' }); }
+
+    const balanceChange = tx.transaction_type === 'credit' ? -Number(tx.amount) : Number(tx.amount);
+    await client.query(`UPDATE bank_accounts SET current_balance = current_balance + $1 WHERE id=$2`, [balanceChange, tx.bank_account_id]);
+    await client.query(`DELETE FROM bank_transactions WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
+    await client.query('COMMIT');
+    res.json({ message: 'Transaction deleted' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+};
+
+export const deleteMpesaTransaction = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(`DELETE FROM mpesa_transactions WHERE id=$1 AND tenant_id=$2 RETURNING id`, [id, tenantId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'M-Pesa transaction not found' });
+    res.json({ message: 'M-Pesa transaction deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

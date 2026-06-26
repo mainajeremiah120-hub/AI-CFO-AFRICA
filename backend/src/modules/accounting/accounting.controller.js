@@ -211,3 +211,47 @@ export const getFiscalYears = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+// ─── JOURNAL ENTRY EDIT / DELETE ────────────────────────
+export const updateJournalEntry = async (req, res) => {
+  const { id } = req.params;
+  const { description, reference } = req.body;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `UPDATE journal_entries SET
+         description = COALESCE($1, description),
+         reference   = COALESCE($2, reference)
+       WHERE id=$3 AND tenant_id=$4 RETURNING *`,
+      [description || null, reference || null, id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Journal entry not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const deleteJournalEntry = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const entry = (await client.query(`SELECT id FROM journal_entries WHERE id=$1 AND tenant_id=$2`, [id, tenantId])).rows[0];
+    if (!entry) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Journal entry not found' }); }
+
+    const lines = (await client.query(`SELECT * FROM journal_lines WHERE journal_entry_id=$1`, [id])).rows;
+    for (const l of lines) {
+      await client.query(`UPDATE accounts SET balance = balance - $1 + $2 WHERE id=$3`, [l.debit, l.credit, l.account_id]);
+    }
+    await client.query(`DELETE FROM journal_lines WHERE journal_entry_id=$1`, [id]);
+    await client.query(`DELETE FROM journal_entries WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
+    await client.query('COMMIT');
+    res.json({ message: 'Journal entry deleted' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+};

@@ -1,50 +1,40 @@
 import express from 'express';
 import {
-  createVendor,
-  getVendors,
-  updateVendor,
-  deleteVendor,
-  createRequisition,
-  getRequisitions,
-  updateRequisitionStatus,
-  createPurchaseOrder,
-  getPurchaseOrders,
-  receiveGoods,
-  getGoodsReceived,
-  createVendorInvoice,
-  getVendorInvoices,
+  createVendor, getVendors, updateVendor, deleteVendor,
+  createRequisition, getRequisitions, updateRequisitionStatus, deleteRequisition,
+  createPurchaseOrder, getPurchaseOrders, updatePurchaseOrder, deletePurchaseOrder,
+  receiveGoods, getGoodsReceived, deleteGoodsReceived,
+  createVendorInvoice, getVendorInvoices, deleteVendorInvoice,
   getProcurementSummary,
 } from './procurement.controller.js';
 import { protect } from '../../middleware/auth.js';
 
 const router = express.Router();
-
 router.use(protect);
 
-// Vendors
 router.post('/vendors', createVendor);
 router.get('/vendors', getVendors);
 router.put('/vendors/:id', updateVendor);
 router.delete('/vendors/:id', deleteVendor);
 
-// Requisitions
 router.post('/requisitions', createRequisition);
 router.get('/requisitions', getRequisitions);
 router.patch('/requisitions/:id/status', updateRequisitionStatus);
+router.delete('/requisitions/:id', deleteRequisition);
 
-// Purchase Orders
 router.post('/purchase-orders', createPurchaseOrder);
 router.get('/purchase-orders', getPurchaseOrders);
+router.put('/purchase-orders/:id', updatePurchaseOrder);
+router.delete('/purchase-orders/:id', deletePurchaseOrder);
 
-// Goods Received
 router.post('/goods-received', receiveGoods);
 router.get('/goods-received', getGoodsReceived);
+router.delete('/goods-received/:id', deleteGoodsReceived);
 
-// Vendor Invoices
 router.post('/vendor-invoices', createVendorInvoice);
 router.get('/vendor-invoices', getVendorInvoices);
+router.delete('/vendor-invoices/:id', deleteVendorInvoice);
 
-// Summary
 router.get('/summary', getProcurementSummary);
 
 export default router;
