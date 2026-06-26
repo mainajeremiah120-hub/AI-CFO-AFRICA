@@ -131,7 +131,7 @@ export default function Procurement() {
 
   const handleUpdateRequisitionStatus = async (id, status) => {
     try {
-      await API.put(`/procurement/requisitions/${id}/status`, { status });
+      await API.patch(`/procurement/requisitions/${id}/status`, { status });
       setSuccess(`Requisition ${status} successfully`);
       fetchRequisitions();
       fetchSummary();
