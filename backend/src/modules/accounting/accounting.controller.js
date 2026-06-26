@@ -163,26 +163,59 @@ export const getTrialBalance = async (req, res) => {
   const { tenantId } = req.user;
 
   try {
-    const result = await pool.query(
-      `SELECT code, name, type, balance
-       FROM accounts
-       WHERE tenant_id = $1 AND is_active = true
-       ORDER BY code ASC`,
-      [tenantId]
-    );
+    // Step 1: Reconcile accounts.balance from journal_lines so the cached
+    // column always matches reality before we read it.
+    await pool.query(`
+      UPDATE accounts a
+      SET balance = COALESCE((
+        SELECT SUM(jl.debit) - SUM(jl.credit)
+        FROM journal_lines jl
+        WHERE jl.account_id = a.id
+      ), 0)
+      WHERE a.tenant_id = $1
+    `, [tenantId]);
 
-    const totalDebit = result.rows
-      .filter(a => a.balance > 0)
-      .reduce((sum, a) => sum + Number(a.balance), 0);
+    // Step 2: Build trial balance directly from journal_lines — this is the
+    // authoritative source. Every journal entry must have debit = credit, so
+    // the grand totals are mathematically guaranteed to balance.
+    const accountRows = await pool.query(`
+      SELECT
+        a.code,
+        a.name,
+        a.type,
+        COALESCE(SUM(jl.debit),  0) AS total_debit,
+        COALESCE(SUM(jl.credit), 0) AS total_credit,
+        COALESCE(SUM(jl.debit),  0) - COALESCE(SUM(jl.credit), 0) AS balance
+      FROM accounts a
+      LEFT JOIN journal_lines jl ON a.id = jl.account_id
+      WHERE a.tenant_id = $1 AND a.is_active = true
+      GROUP BY a.id, a.code, a.name, a.type
+      HAVING COALESCE(SUM(jl.debit), 0) <> 0
+          OR COALESCE(SUM(jl.credit), 0) <> 0
+      ORDER BY a.code ASC
+    `, [tenantId]);
 
-    const totalCredit = result.rows
-      .filter(a => a.balance < 0)
-      .reduce((sum, a) => sum + Number(a.balance), 0);
+    // Step 3: Grand totals come from the journal_lines table directly.
+    // These will always be equal — if they differ it means a journal entry
+    // was inserted with unequal debits/credits (a data-integrity bug).
+    const totals = await pool.query(`
+      SELECT
+        COALESCE(SUM(jl.debit),  0) AS grand_debit,
+        COALESCE(SUM(jl.credit), 0) AS grand_credit
+      FROM journal_lines jl
+      JOIN journal_entries je ON jl.journal_entry_id = je.id
+      WHERE je.tenant_id = $1
+    `, [tenantId]);
+
+    const { grand_debit, grand_credit } = totals.rows[0];
+    const diff = Math.abs(Number(grand_debit) - Number(grand_credit));
 
     res.json({
-      accounts: result.rows,
-      totalDebit,
-      totalCredit: Math.abs(totalCredit),
+      accounts: accountRows.rows,
+      totalDebit:  Number(grand_debit),
+      totalCredit: Number(grand_credit),
+      balanced: diff < 0.01,
+      difference: diff,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

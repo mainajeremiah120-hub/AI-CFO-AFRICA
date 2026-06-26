@@ -437,7 +437,22 @@ export default function Accounting() {
       {/* ── TRIAL BALANCE ── */}
       {tab === 'trial-balance' && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-          <h2 className="text-base font-semibold text-gray-800 mb-4">Trial Balance</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-gray-800">Trial Balance</h2>
+            {trialBalance && (
+              trialBalance.balanced
+                ? <span className="flex items-center gap-1.5 text-sm font-medium text-green-600 bg-green-50 px-3 py-1 rounded-full">
+                    ✓ Balanced
+                  </span>
+                : <span className="flex items-center gap-1.5 text-sm font-medium text-red-600 bg-red-50 px-3 py-1 rounded-full">
+                    ✗ Out of balance by KES {Number(trialBalance.difference).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                  </span>
+            )}
+          </div>
+
+          {!trialBalance || trialBalance.accounts?.length === 0 ? (
+            <p className="text-center text-gray-400 text-sm py-10">No journal entries yet — post transactions to see the trial balance.</p>
+          ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -445,38 +460,45 @@ export default function Accounting() {
                   <th className="text-left py-2 px-3 text-gray-600 font-medium">Code</th>
                   <th className="text-left py-2 px-3 text-gray-600 font-medium">Account Name</th>
                   <th className="text-left py-2 px-3 text-gray-600 font-medium">Type</th>
-                  <th className="text-right py-2 px-3 text-gray-600 font-medium">Debit (KES)</th>
-                  <th className="text-right py-2 px-3 text-gray-600 font-medium">Credit (KES)</th>
+                  <th className="text-right py-2 px-3 text-blue-700 font-medium">Debit (KES)</th>
+                  <th className="text-right py-2 px-3 text-green-700 font-medium">Credit (KES)</th>
                 </tr>
               </thead>
               <tbody>
-                {trialBalance?.accounts?.map(account => (
-                  <tr key={account.code} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="py-2.5 px-3 font-mono text-gray-600">{account.code}</td>
-                    <td className="py-2.5 px-3 text-gray-800">{account.name}</td>
-                    <td className="py-2.5 px-3 text-gray-500 capitalize">{account.type}</td>
-                    <td className="py-2.5 px-3 text-right text-blue-600 font-medium">
-                      {account.balance > 0 ? Number(account.balance).toLocaleString('en-KE', { minimumFractionDigits: 2 }) : '—'}
-                    </td>
-                    <td className="py-2.5 px-3 text-right text-green-600 font-medium">
-                      {account.balance < 0 ? Number(Math.abs(account.balance)).toLocaleString('en-KE', { minimumFractionDigits: 2 }) : '—'}
-                    </td>
-                  </tr>
-                ))}
+                {trialBalance.accounts.map(account => {
+                  const bal = Number(account.balance);
+                  return (
+                    <tr key={account.code} className="border-b border-gray-50 hover:bg-gray-50">
+                      <td className="py-2.5 px-3 font-mono text-gray-500 text-xs">{account.code}</td>
+                      <td className="py-2.5 px-3 text-gray-800">{account.name}</td>
+                      <td className="py-2.5 px-3 text-gray-400 capitalize text-xs">{account.type}</td>
+                      <td className="py-2.5 px-3 text-right text-blue-600 font-medium">
+                        {bal > 0 ? bal.toLocaleString('en-KE', { minimumFractionDigits: 2 }) : '—'}
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-green-600 font-medium">
+                        {bal < 0 ? Math.abs(bal).toLocaleString('en-KE', { minimumFractionDigits: 2 }) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
               <tfoot>
-                <tr className="border-t-2 border-gray-200 font-semibold">
-                  <td colSpan="3" className="py-3 px-3 text-gray-800">Total</td>
-                  <td className="py-3 px-3 text-right text-blue-600">
-                    {Number(trialBalance?.totalDebit || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                <tr className="border-t-2 border-gray-300 font-bold bg-gray-50">
+                  <td colSpan="3" className="py-3 px-3 text-gray-800">TOTAL</td>
+                  <td className="py-3 px-3 text-right text-blue-700 text-base">
+                    {Number(trialBalance.totalDebit).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
                   </td>
-                  <td className="py-3 px-3 text-right text-green-600">
-                    {Number(trialBalance?.totalCredit || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                  <td className="py-3 px-3 text-right text-green-700 text-base">
+                    {Number(trialBalance.totalCredit).toLocaleString('en-KE', { minimumFractionDigits: 2 })}
                   </td>
                 </tr>
               </tfoot>
             </table>
           </div>
+          )}
+          <p className="text-xs text-gray-400 mt-3">
+            Computed from journal lines — automatically reconciled on load.
+          </p>
         </div>
       )}
 
