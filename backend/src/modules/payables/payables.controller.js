@@ -182,7 +182,7 @@ export const getBill = async (req, res) => {
 // ─── BILL PAYMENTS ───────────────────────────────────────
 
 export const recordBillPayment = async (req, res) => {
-  const { bill_id, amount, payment_date, payment_method, reference, notes } = req.body;
+  const { bill_id, amount, payment_date, payment_method, reference, notes, bank_account_id } = req.body;
   const { tenantId, userId } = req.user;
 
   const client = await pool.connect();
@@ -249,6 +249,20 @@ export const recordBillPayment = async (req, res) => {
     await client.query(`UPDATE accounts SET balance = balance + $1 WHERE id = $2 AND tenant_id = $3`, [amount, apAccountId, tenantId]);
     await client.query(`UPDATE accounts SET balance = balance - $1 WHERE id = $2 AND tenant_id = $3`, [amount, cashAccountId, tenantId]);
     // ────────────────────────────────────────────────────────────────────────────────
+
+    // ─── DEDUCT FROM SPECIFIC BANK ACCOUNT (Banking module) ─────────────────
+    if (bank_account_id) {
+      await client.query(
+        `UPDATE bank_accounts SET current_balance = current_balance - $1 WHERE id = $2 AND tenant_id = $3`,
+        [amount, bank_account_id, tenantId]
+      );
+      await client.query(
+        `INSERT INTO bank_transactions (tenant_id, bank_account_id, transaction_date, description, amount, transaction_type, reference)
+         VALUES ($1, $2, $3, $4, $5, 'debit', $6)`,
+        [tenantId, bank_account_id, payment_date, `Bill payment — ${bill.bill_number}`, amount, reference || `BILL-PAY-${bill_id}`]
+      );
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     await client.query('COMMIT');
     res.status(201).json(paymentResult.rows[0]);

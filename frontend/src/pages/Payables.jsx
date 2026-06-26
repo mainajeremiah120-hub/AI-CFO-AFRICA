@@ -8,6 +8,7 @@ export default function Payables() {
   const [bills, setBills] = useState([]);
   const [payments, setPayments] = useState([]);
   const [summary, setSummary] = useState(null);
+  const [bankAccounts, setBankAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -38,6 +39,7 @@ export default function Payables() {
     amount: '',
     payment_date: new Date().toISOString().split('T')[0],
     payment_method: 'cash',
+    bank_account_id: '',
     reference: '',
     notes: ''
   });
@@ -45,6 +47,7 @@ export default function Payables() {
   useEffect(() => {
     fetchSummary();
     fetchSuppliers();
+    fetchBankAccounts();
   }, []);
 
   useEffect(() => {
@@ -52,6 +55,13 @@ export default function Payables() {
     if (tab === 'payments') { fetchPayments(); fetchBills(); }
     if (tab === 'suppliers') fetchSuppliers();
   }, [tab]);
+
+  const fetchBankAccounts = async () => {
+    try {
+      const res = await API.get('/banking/accounts');
+      setBankAccounts(res.data);
+    } catch (err) {}
+  };
 
   const fetchSummary = async () => {
     try {
@@ -228,7 +238,8 @@ export default function Payables() {
     try {
       await API.post('/payables/payments', { ...paymentForm, amount: Number(paymentForm.amount) });
       setSuccess('Payment recorded successfully');
-      setPaymentForm({ bill_id: '', amount: '', payment_date: new Date().toISOString().split('T')[0], payment_method: 'cash', reference: '', notes: '' });
+      setPaymentForm({ bill_id: '', amount: '', payment_date: new Date().toISOString().split('T')[0], payment_method: 'cash', bank_account_id: '', reference: '', notes: '' });
+      fetchBankAccounts();
       fetchPayments();
       fetchBills();
       fetchSummary();
@@ -759,6 +770,25 @@ export default function Payables() {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Pay From Account</label>
+                <select
+                  value={paymentForm.bank_account_id}
+                  onChange={e => {
+                    const acc = bankAccounts.find(a => String(a.id) === e.target.value);
+                    const method = acc?.account_type === 'cash' ? 'cash' : acc?.account_type === 'mpesa' ? 'mpesa' : 'bank';
+                    setPaymentForm({ ...paymentForm, bank_account_id: e.target.value, payment_method: e.target.value ? method : paymentForm.payment_method });
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="">— select account —</option>
+                  {bankAccounts.map(acc => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.account_name} — KES {Number(acc.current_balance).toLocaleString()} ({acc.account_type})
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
                 <select

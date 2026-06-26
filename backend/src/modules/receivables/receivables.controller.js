@@ -162,7 +162,7 @@ export const getInvoice = async (req, res) => {
 
 // ─── PAYMENTS ────────────────────────────────────────────
 export const recordPayment = async (req, res) => {
-  const { invoice_id, amount, payment_date, payment_method, reference, notes } = req.body;
+  const { invoice_id, amount, payment_date, payment_method, reference, notes, bank_account_id } = req.body;
   const { tenantId, userId } = req.user;
   const client = await pool.connect();
   try {
@@ -201,6 +201,20 @@ export const recordPayment = async (req, res) => {
         [entryRes.rows[0].id, cashAccountId, amount, arAccountId]);
     await client.query(`UPDATE accounts SET balance = balance + $1 WHERE id = $2`, [amount, cashAccountId]);
     await client.query(`UPDATE accounts SET balance = balance - $1 WHERE id = $2`, [amount, arAccountId]);
+
+    // ─── CREDIT SPECIFIC BANK ACCOUNT (Banking module) ───────────────────────
+    if (bank_account_id) {
+      await client.query(
+        `UPDATE bank_accounts SET current_balance = current_balance + $1 WHERE id = $2 AND tenant_id = $3`,
+        [amount, bank_account_id, tenantId]
+      );
+      await client.query(
+        `INSERT INTO bank_transactions (tenant_id, bank_account_id, transaction_date, description, amount, transaction_type, reference)
+         VALUES ($1, $2, $3, $4, $5, 'credit', $6)`,
+        [tenantId, bank_account_id, payment_date, `Invoice payment — ${invoice.invoice_number}`, amount, reference || `INV-PAY-${invoice_id}`]
+      );
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     await client.query('COMMIT');
     res.status(201).json({ message: "Payment recorded" });
