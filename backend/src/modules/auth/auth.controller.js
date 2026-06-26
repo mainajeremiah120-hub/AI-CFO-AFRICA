@@ -19,15 +19,23 @@ const DEFAULT_ACCOUNTS = [
 
 export const seedAccounts = async (tenantId, client) => {
   const db = client || pool;
+
+  // Get codes already in the DB for this tenant
+  const existing = await db.query(
+    `SELECT code FROM accounts WHERE tenant_id = $1`,
+    [tenantId]
+  );
+  const existingCodes = new Set(existing.rows.map(r => r.code));
+
+  // Only insert accounts that are missing
   for (const acc of DEFAULT_ACCOUNTS) {
-    await db.query(
-      `INSERT INTO accounts (tenant_id, code, name, type, balance, is_active)
-       SELECT $1, $2, $3, $4, 0, true
-       WHERE NOT EXISTS (
-         SELECT 1 FROM accounts WHERE tenant_id = $1 AND code = $2
-       )`,
-      [tenantId, acc.code, acc.name, acc.type]
-    );
+    if (!existingCodes.has(acc.code)) {
+      await db.query(
+        `INSERT INTO accounts (tenant_id, code, name, type, balance, is_active)
+         VALUES ($1, $2, $3, $4, 0, true)`,
+        [tenantId, acc.code, acc.name, acc.type]
+      );
+    }
   }
 };
 
