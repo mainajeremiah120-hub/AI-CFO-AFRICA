@@ -12,33 +12,69 @@ const STATUS_COLOR = {
   draft:     'bg-gray-100 text-gray-600 border border-gray-200',
 };
 
-// ─── Print helper ────────────────────────────────────────────────────────────
+// ─── Shared print styles ─────────────────────────────────────────────────────
+const PRINT_BASE_CSS = `
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:24px}
+  @media print{body{padding:10px}}
+`;
+
+// ─── Full payroll schedule print ─────────────────────────────────────────────
 function printPayroll(run, payslips) {
   const month = MONTHS[(run.month || 1) - 1];
   const year  = run.year;
 
-  const rows = payslips.map(p => `
-    <tr>
+  // Always compute totals from the payslips array — never trust the run aggregate
+  // fields, which may be missing when the run object comes from a cached old response.
+  const T = payslips.reduce((a, p) => ({
+    gross:   a.gross   + Number(p.gross_pay        || 0),
+    paye:    a.paye    + Number(p.paye             || 0),
+    nssf:    a.nssf    + Number(p.nssf             || 0),
+    nhif:    a.nhif    + Number(p.nhif             || 0),
+    housing: a.housing + Number(p.other_deductions || 0),
+    ded:     a.ded     + Number(p.total_deductions || 0),
+    net:     a.net     + Number(p.net_pay          || 0),
+  }), { gross:0, paye:0, nssf:0, nhif:0, housing:0, ded:0, net:0 });
+
+  // Derive housing levy from basic_salary if stored value is 0 (legacy run)
+  const rows = payslips.map(p => {
+    const gross   = Number(p.gross_pay        || 0);
+    const paye    = Number(p.paye             || 0);
+    const nssf    = Number(p.nssf             || 0);
+    const nhif    = Number(p.nhif             || 0);
+    const housing = Number(p.other_deductions || 0) || Math.round(gross * 0.015);
+    const totalDed = paye + nssf + nhif + housing;
+    const net     = gross - totalDed;
+    return `<tr>
       <td>${p.employee_number || '—'}</td>
       <td>${p.full_name}</td>
       <td>${p.position || '—'}</td>
-      <td class="num">${Number(p.gross_pay).toLocaleString()}</td>
-      <td class="num">${Number(p.paye).toLocaleString()}</td>
-      <td class="num">${Number(p.nssf).toLocaleString()}</td>
-      <td class="num">${Number(p.nhif).toLocaleString()}</td>
-      <td class="num">${Number(p.other_deductions).toLocaleString()}</td>
-      <td class="num">${Number(p.total_deductions).toLocaleString()}</td>
-      <td class="num bold">${Number(p.net_pay).toLocaleString()}</td>
-    </tr>`).join('');
+      <td class="num">${gross.toLocaleString()}</td>
+      <td class="num">${paye.toLocaleString()}</td>
+      <td class="num">${nssf.toLocaleString()}</td>
+      <td class="num">${nhif.toLocaleString()}</td>
+      <td class="num">${housing.toLocaleString()}</td>
+      <td class="num">${totalDed.toLocaleString()}</td>
+      <td class="num bold">${net.toLocaleString()}</td>
+    </tr>`;
+  }).join('');
 
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
+  // Recompute corrected totals (with housing levy derived for legacy payslips)
+  const TC = payslips.reduce((a, p) => {
+    const g = Number(p.gross_pay || 0);
+    const py = Number(p.paye || 0);
+    const ns = Number(p.nssf || 0);
+    const nh = Number(p.nhif || 0);
+    const hs = Number(p.other_deductions || 0) || Math.round(g * 0.015);
+    const d  = py + ns + nh + hs;
+    return { gross: a.gross+g, paye: a.paye+py, nssf: a.nssf+ns,
+             nhif: a.nhif+nh, housing: a.housing+hs, ded: a.ded+d, net: a.net+(g-d) };
+  }, { gross:0, paye:0, nssf:0, nhif:0, housing:0, ded:0, net:0 });
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
   <title>Payroll — ${month} ${year}</title>
   <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:20px}
+    ${PRINT_BASE_CSS}
     h1{font-size:18px;font-weight:700;margin-bottom:2px}
     .sub{color:#555;font-size:12px;margin-bottom:16px}
     .meta{display:flex;gap:40px;margin-bottom:20px;padding:12px;background:#f5f5f5;border-radius:4px;flex-wrap:wrap}
@@ -51,68 +87,169 @@ function printPayroll(run, payslips) {
     td{padding:5px 8px;border-bottom:1px solid #e5e5e5;font-size:10px}
     tr:nth-child(even) td{background:#fafafa}
     .bold{font-weight:700}
-    .totals td{background:#1e3a5f;color:#fff;font-weight:700;padding:7px 8px}
-    .deductions-box{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+    .totals td{background:#1e3a5f!important;color:#fff;font-weight:700;padding:7px 8px}
+    .dboxes{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
     .dbox{flex:1;min-width:100px;background:#f5f5f5;border-radius:4px;padding:10px;text-align:center}
     .dbox .label{font-size:9px;color:#666;margin-bottom:3px}
     .dbox .val{font-size:14px;font-weight:700;color:#a31b32}
     .footer{margin-top:24px;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:8px;display:flex;justify-content:space-between}
-    @media print{body{padding:10px}}
-  </style>
-</head>
-<body>
+  </style></head><body>
   <h1>Payroll Schedule</h1>
   <p class="sub">${month} ${year} &nbsp;&middot;&nbsp; Status: ${(run.status||'').toUpperCase()}</p>
-
   <div class="meta">
     <div><span>Period</span><span>${month} ${year}</span></div>
     <div><span>Employees</span><span>${payslips.length}</span></div>
-    <div><span>Gross Payroll</span><span>KES ${Number(run.total_gross||0).toLocaleString()}</span></div>
-    <div><span>Total Deductions</span><span>KES ${Number(run.total_deductions||0).toLocaleString()}</span></div>
-    <div><span>Net Pay</span><span>KES ${Number(run.total_net||0).toLocaleString()}</span></div>
+    <div><span>Gross Payroll</span><span>KES ${TC.gross.toLocaleString()}</span></div>
+    <div><span>Total Deductions</span><span>KES ${TC.ded.toLocaleString()}</span></div>
+    <div><span>Net Pay</span><span>KES ${TC.net.toLocaleString()}</span></div>
   </div>
-
-  <div class="deductions-box">
-    <div class="dbox"><div class="label">PAYE</div><div class="val">KES ${Number(run.total_paye||0).toLocaleString()}</div></div>
-    <div class="dbox"><div class="label">NSSF</div><div class="val">KES ${Number(run.total_nssf||0).toLocaleString()}</div></div>
-    <div class="dbox"><div class="label">NHIF / SHA</div><div class="val">KES ${Number(run.total_nhif||0).toLocaleString()}</div></div>
-    <div class="dbox"><div class="label">Housing Levy (1.5%)</div><div class="val">KES ${Number(run.total_housing||0).toLocaleString()}</div></div>
+  <div class="dboxes">
+    <div class="dbox"><div class="label">PAYE</div><div class="val">KES ${TC.paye.toLocaleString()}</div></div>
+    <div class="dbox"><div class="label">NSSF</div><div class="val">KES ${TC.nssf.toLocaleString()}</div></div>
+    <div class="dbox"><div class="label">NHIF / SHA</div><div class="val">KES ${TC.nhif.toLocaleString()}</div></div>
+    <div class="dbox"><div class="label">Housing Levy (1.5%)</div><div class="val">KES ${TC.housing.toLocaleString()}</div></div>
   </div>
-
-  <table>
-    <thead>
-      <tr>
-        <th>EMP #</th><th>Name</th><th>Position</th>
-        <th class="num">Gross (KES)</th>
-        <th class="num">PAYE</th><th class="num">NSSF</th>
-        <th class="num">NHIF</th><th class="num">Hsg Levy</th>
-        <th class="num">Total Ded.</th><th class="num">Net Pay</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${rows}
-      <tr class="totals">
-        <td colspan="3">TOTALS</td>
-        <td class="num">${Number(run.total_gross||0).toLocaleString()}</td>
-        <td class="num">${Number(run.total_paye||0).toLocaleString()}</td>
-        <td class="num">${Number(run.total_nssf||0).toLocaleString()}</td>
-        <td class="num">${Number(run.total_nhif||0).toLocaleString()}</td>
-        <td class="num">${Number(run.total_housing||0).toLocaleString()}</td>
-        <td class="num">${Number(run.total_deductions||0).toLocaleString()}</td>
-        <td class="num">${Number(run.total_net||0).toLocaleString()}</td>
-      </tr>
-    </tbody>
-  </table>
-
+  <table><thead><tr>
+    <th>EMP #</th><th>Name</th><th>Position</th>
+    <th class="num">Gross (KES)</th><th class="num">PAYE</th><th class="num">NSSF</th>
+    <th class="num">NHIF</th><th class="num">Hsg Levy</th><th class="num">Total Ded.</th><th class="num">Net Pay</th>
+  </tr></thead><tbody>
+    ${rows}
+    <tr class="totals">
+      <td colspan="3">TOTALS</td>
+      <td class="num">${TC.gross.toLocaleString()}</td>
+      <td class="num">${TC.paye.toLocaleString()}</td>
+      <td class="num">${TC.nssf.toLocaleString()}</td>
+      <td class="num">${TC.nhif.toLocaleString()}</td>
+      <td class="num">${TC.housing.toLocaleString()}</td>
+      <td class="num">${TC.ded.toLocaleString()}</td>
+      <td class="num">${TC.net.toLocaleString()}</td>
+    </tr>
+  </tbody></table>
   <div class="footer">
     <span>Generated: ${new Date().toLocaleString('en-KE')}</span>
     <span>CONFIDENTIAL — For authorised personnel only</span>
   </div>
-  <script>window.onload = () => window.print();</script>
-</body>
-</html>`;
+  <script>window.onload=()=>window.print();</script>
+</body></html>`;
 
   const w = window.open('', '_blank', 'width=1100,height=700');
+  w.document.write(html);
+  w.document.close();
+}
+
+// ─── Individual payslip print ─────────────────────────────────────────────────
+function printPayslip(p, run) {
+  const month = MONTHS[(run.month || 1) - 1];
+  const year  = run.year;
+
+  const gross   = Number(p.gross_pay        || p.basic_salary || 0);
+  const paye    = Number(p.paye             || 0) || Math.round(gross * 0.20);
+  const nssf    = Number(p.nssf             || 0) || 2160;
+  const nhif    = Number(p.nhif             || 0) || (gross > 100000 ? 1700 : gross > 50000 ? 1200 : gross > 30000 ? 850 : 500);
+  const housing = Number(p.other_deductions || 0) || Math.round(gross * 0.015);
+  const totalDed = paye + nssf + nhif + housing;
+  const net     = gross - totalDed;
+
+  const row = (label, amount, color='#111') =>
+    `<tr><td class="rl">${label}</td><td class="ra" style="color:${color}">${amount < 0 ? '-' : ''}KES ${Math.abs(amount).toLocaleString()}</td></tr>`;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
+  <title>Payslip — ${p.full_name} — ${month} ${year}</title>
+  <style>
+    ${PRINT_BASE_CSS}
+    .header{background:#a31b32;color:#fff;padding:16px 20px;border-radius:6px 6px 0 0;margin-bottom:0}
+    .header h1{font-size:20px;font-weight:700;letter-spacing:0.5px}
+    .header p{font-size:11px;opacity:0.85;margin-top:4px}
+    .card{background:#fff;border:1px solid #e5e5e5;border-top:none;border-radius:0 0 6px 6px;padding:20px}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
+    .info-block p.label{font-size:9px;color:#888;margin-bottom:1px}
+    .info-block p.val{font-size:12px;font-weight:600;color:#222}
+    .divider{border:none;border-top:1px solid #eee;margin:16px 0}
+    .tables{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+    .section-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#666;margin-bottom:8px}
+    table{width:100%;border-collapse:collapse}
+    td{padding:5px 0;font-size:11px;border-bottom:1px solid #f5f5f5}
+    td.rl{color:#555}
+    td.ra{text-align:right;font-weight:600}
+    .net-box{background:#f0f9f0;border:2px solid #22c55e;border-radius:6px;padding:14px 20px;margin-top:20px;display:flex;justify-content:space-between;align-items:center}
+    .net-box .nl{font-size:13px;font-weight:700;color:#15803d}
+    .net-box .nv{font-size:22px;font-weight:700;color:#15803d}
+    .sigs{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:28px}
+    .sig-line{border-top:1px solid #999;padding-top:4px;font-size:9px;color:#888;text-align:center}
+    .footer-note{font-size:9px;color:#bbb;text-align:center;margin-top:20px;border-top:1px solid #f0f0f0;padding-top:8px}
+    @media print{.no-print{display:none}}
+  </style></head><body>
+  <div class="header">
+    <h1>Employee Payslip</h1>
+    <p>Pay Period: ${month} ${year} &nbsp;&middot;&nbsp; Issued: ${new Date().toLocaleDateString('en-KE')}</p>
+  </div>
+  <div class="card">
+    <div class="grid2">
+      <div>
+        <div class="info-block" style="margin-bottom:10px">
+          <p class="label">Employee Name</p>
+          <p class="val" style="font-size:15px">${p.full_name}</p>
+        </div>
+        <div class="grid2" style="gap:10px">
+          <div class="info-block"><p class="label">Employee #</p><p class="val">${p.employee_number || '—'}</p></div>
+          <div class="info-block"><p class="label">Position</p><p class="val">${p.position || '—'}</p></div>
+          <div class="info-block"><p class="label">Department</p><p class="val">${p.department || '—'}</p></div>
+          <div class="info-block"><p class="label">Bank Account</p><p class="val">${p.bank_account || '—'}</p></div>
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div class="info-block" style="margin-bottom:10px">
+          <p class="label">Pay Period</p>
+          <p class="val" style="font-size:15px">${month} ${year}</p>
+        </div>
+        <div class="info-block" style="margin-bottom:8px"><p class="label">Status</p><p class="val" style="color:#16a34a">${(run.status||'').toUpperCase()}</p></div>
+        <div class="info-block"><p class="label">Payment Method</p><p class="val">Bank Transfer</p></div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <div class="tables">
+      <div>
+        <p class="section-title">Earnings</p>
+        <table>
+          ${row('Basic Salary', gross, '#1e40af')}
+          ${row('Gross Pay', gross, '#1e40af')}
+        </table>
+      </div>
+      <div>
+        <p class="section-title">Statutory Deductions</p>
+        <table>
+          ${row('PAYE (Income Tax)', paye, '#dc2626')}
+          ${row('NSSF (Pension)', nssf, '#dc2626')}
+          ${row('NHIF / SHA (Health)', nhif, '#dc2626')}
+          ${row('Housing Levy (1.5%)', housing, '#dc2626')}
+          <tr style="border-top:2px solid #eee">
+            <td class="rl" style="font-weight:700;padding-top:8px">Total Deductions</td>
+            <td class="ra" style="color:#dc2626;font-weight:700;padding-top:8px">KES ${totalDed.toLocaleString()}</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="net-box">
+      <span class="nl">NET PAY (Amount to be paid)</span>
+      <span class="nv">KES ${net.toLocaleString()}</span>
+    </div>
+
+    <div class="sigs">
+      <div class="sig-line">Employee Signature</div>
+      <div class="sig-line">HR / Payroll Officer</div>
+      <div class="sig-line">Finance Director</div>
+    </div>
+
+    <p class="footer-note">This payslip is computer-generated. CONFIDENTIAL — ${p.full_name} only.</p>
+  </div>
+  <script>window.onload=()=>window.print();</script>
+</body></html>`;
+
+  const w = window.open('', '_blank', 'width=720,height=680');
   w.document.write(html);
   w.document.close();
 }
@@ -698,31 +835,56 @@ export default function Payroll() {
                             </tr>
                           </thead>
                           <tbody>
-                            {payslips[r.id].map(p => (
+                            {payslips[r.id].map(p => {
+                              // Derive housing levy for legacy payslips that stored 0
+                              const gross   = Number(p.gross_pay || 0);
+                              const paye    = Number(p.paye || 0);
+                              const nssf    = Number(p.nssf || 0);
+                              const nhif    = Number(p.nhif || 0);
+                              const housing = Number(p.other_deductions || 0) || Math.round(gross * 0.015);
+                              const totalDed = paye + nssf + nhif + housing;
+                              const net     = gross - totalDed;
+                              return (
                               <tr key={p.id} className="border-t border-gray-100 hover:bg-white transition">
                                 <td className="px-4 py-2.5">
                                   <p className="font-medium text-gray-800">{p.full_name}</p>
                                   <p className="text-gray-400">{[p.employee_number, p.position].filter(Boolean).join(' · ')}</p>
+                                  <button
+                                    onClick={() => printPayslip(p, r)}
+                                    className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-0.5 underline"
+                                  >Print Payslip</button>
                                 </td>
-                                <td className="text-right px-3 py-2.5 text-gray-700">{fmt(p.gross_pay)}</td>
-                                <td className="text-right px-3 py-2.5 text-orange-600">{fmt(p.paye)}</td>
-                                <td className="text-right px-3 py-2.5 text-blue-600">{fmt(p.nssf)}</td>
-                                <td className="text-right px-3 py-2.5 text-purple-600">{fmt(p.nhif)}</td>
-                                <td className="text-right px-3 py-2.5 text-teal-600">{fmt(p.other_deductions)}</td>
-                                <td className="text-right px-3 py-2.5 text-gray-600">{fmt(p.total_deductions)}</td>
-                                <td className="text-right px-4 py-2.5 font-bold text-green-700">{fmt(p.net_pay)}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-700">{fmt(gross)}</td>
+                                <td className="text-right px-3 py-2.5 text-orange-600">{fmt(paye)}</td>
+                                <td className="text-right px-3 py-2.5 text-blue-600">{fmt(nssf)}</td>
+                                <td className="text-right px-3 py-2.5 text-purple-600">{fmt(nhif)}</td>
+                                <td className="text-right px-3 py-2.5 text-teal-600">{fmt(housing)}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-600">{fmt(totalDed)}</td>
+                                <td className="text-right px-4 py-2.5 font-bold text-green-700">{fmt(net)}</td>
                               </tr>
-                            ))}
-                            <tr className="bg-gray-800 text-white">
-                              <td className="px-4 py-2.5 font-semibold text-white">TOTALS</td>
-                              <td className="text-right px-3 py-2.5 font-bold text-white">{fmt(r.total_gross)}</td>
-                              <td className="text-right px-3 py-2.5 font-bold text-white">{fmt(r.total_paye)}</td>
-                              <td className="text-right px-3 py-2.5 font-bold text-white">{fmt(r.total_nssf)}</td>
-                              <td className="text-right px-3 py-2.5 font-bold text-white">{fmt(r.total_nhif)}</td>
-                              <td className="text-right px-3 py-2.5 font-bold text-white">{fmt(r.total_housing)}</td>
-                              <td className="text-right px-3 py-2.5 font-bold text-white">{fmt(r.total_deductions)}</td>
-                              <td className="text-right px-4 py-2.5 font-bold text-green-300">{fmt(r.total_net)}</td>
-                            </tr>
+                              );
+                            })}
+                            <tr className="bg-gray-800 text-white">{(() => {
+                              const TC = (payslips[r.id] || []).reduce((a, p) => {
+                                const g  = Number(p.gross_pay || 0);
+                                const py = Number(p.paye || 0);
+                                const ns = Number(p.nssf || 0);
+                                const nh = Number(p.nhif || 0);
+                                const hs = Number(p.other_deductions || 0) || Math.round(g * 0.015);
+                                const d  = py + ns + nh + hs;
+                                return { g: a.g+g, py: a.py+py, ns: a.ns+ns, nh: a.nh+nh, hs: a.hs+hs, d: a.d+d, n: a.n+(g-d) };
+                              }, { g:0, py:0, ns:0, nh:0, hs:0, d:0, n:0 });
+                              return (<>
+                                <td className="px-4 py-2.5 font-semibold text-white">TOTALS</td>
+                                <td className="text-right px-3 py-2.5 font-bold text-white">{fmt(TC.g)}</td>
+                                <td className="text-right px-3 py-2.5 font-bold text-white">{fmt(TC.py)}</td>
+                                <td className="text-right px-3 py-2.5 font-bold text-white">{fmt(TC.ns)}</td>
+                                <td className="text-right px-3 py-2.5 font-bold text-white">{fmt(TC.nh)}</td>
+                                <td className="text-right px-3 py-2.5 font-bold text-white">{fmt(TC.hs)}</td>
+                                <td className="text-right px-3 py-2.5 font-bold text-white">{fmt(TC.d)}</td>
+                                <td className="text-right px-4 py-2.5 font-bold text-green-300">{fmt(TC.n)}</td>
+                              </>);
+                            })()}</tr>
                           </tbody>
                         </table>
                       </div>
