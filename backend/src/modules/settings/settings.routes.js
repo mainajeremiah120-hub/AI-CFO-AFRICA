@@ -11,6 +11,7 @@ import {
   updateUserRole,
   deleteUser,
   resetTransactionData,
+  seedDefaultAccounts,
 } from './settings.controller.js';
 import { protect } from '../../middleware/auth.js';
 
@@ -38,13 +39,6 @@ router.delete('/users/:id', deleteUser);
 router.post('/reset', resetTransactionData);
 
 // Seed default accounts for existing tenants
-router.post('/seed-accounts', async (req, res) => {
-  try {
-    await seedAccounts(req.user.tenantId);
-    res.json({ message: 'Default accounts seeded successfully' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.post('/seed-accounts', seedDefaultAccounts);
 
 export default router;

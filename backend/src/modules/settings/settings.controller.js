@@ -3,6 +3,15 @@ import bcrypt from 'bcryptjs';
 import { sendWelcomeEmail, sendUserUpdateEmail } from '../../config/mailer.js';
 import { seedAccounts } from '../auth/auth.controller.js';
 
+export const seedDefaultAccounts = async (req, res) => {
+  try {
+    await seedAccounts(req.user.tenantId);
+    res.json({ message: 'Default accounts seeded successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 // ─── COMPANY SETTINGS ────────────────────────────────────
 
 export const getSettings = async (req, res) => {
