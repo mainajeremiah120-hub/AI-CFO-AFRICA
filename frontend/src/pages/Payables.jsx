@@ -158,7 +158,15 @@ export default function Payables() {
     setLoading(true);
     setError('');
     try {
-      const payload = { ...billForm, tax_rate: Number(billForm.tax_rate) };
+      const payload = {
+        ...billForm,
+        tax_rate: Number(billForm.tax_rate) || 0,
+        items: billForm.items.map(it => ({
+          description: it.description,
+          quantity: Number(it.quantity) || 0,
+          unit_price: Number(it.unit_price) || 0,
+        })),
+      };
       if (editingBillId) {
         await API.put(`/payables/bills/${editingBillId}`, payload);
         setSuccess('Bill updated successfully');
@@ -591,7 +599,7 @@ export default function Payables() {
                       </div>
                       <div className="col-span-2 text-right">
                         <span className="text-xs text-gray-600 font-medium">
-                          {(item.quantity * item.unit_price).toLocaleString()}
+                          {((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)).toLocaleString()}
                         </span>
                         <button
                           type="button"

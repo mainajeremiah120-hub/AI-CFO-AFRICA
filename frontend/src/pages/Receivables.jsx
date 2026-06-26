@@ -29,7 +29,7 @@ export default function Receivables() {
     due_date: '',
     tax_rate: 0,
     notes: '',
-    items: [{ description: '', quantity: 1, unit_price: 0 }]
+    items: [{ description: '', quantity: '', unit_price: '' }]
   });
 
   // Payment form
@@ -126,7 +126,7 @@ export default function Receivables() {
   // ── INVOICE handlers ──
   const updateItem = (index, field, value) => {
     const updated = [...invoiceForm.items];
-    updated[index][field] = field === 'description' ? value : Number(value);
+    updated[index][field] = value; // keep as raw string so '' shows as empty placeholder
     setInvoiceForm({ ...invoiceForm, items: updated });
   };
 
@@ -139,7 +139,7 @@ export default function Receivables() {
     setInvoiceForm({ ...invoiceForm, items: invoiceForm.items.filter((_, i) => i !== index) });
   };
 
-  const subtotal = invoiceForm.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+  const subtotal = invoiceForm.items.reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)), 0);
   const taxAmount = (subtotal * invoiceForm.tax_rate) / 100;
   const totalAmount = subtotal + taxAmount;
 
@@ -150,7 +150,7 @@ export default function Receivables() {
     due_date: '',
     tax_rate: 0,
     notes: '',
-    items: [{ description: '', quantity: 1, unit_price: 0 }]
+    items: [{ description: '', quantity: '', unit_price: '' }]
   });
 
   const handleSaveInvoice = async (e) => {
@@ -158,7 +158,15 @@ export default function Receivables() {
     setLoading(true);
     setError('');
     try {
-      const payload = { ...invoiceForm, tax_rate: Number(invoiceForm.tax_rate) };
+      const payload = {
+        ...invoiceForm,
+        tax_rate: Number(invoiceForm.tax_rate) || 0,
+        items: invoiceForm.items.map(it => ({
+          description: it.description,
+          quantity: Number(it.quantity) || 0,
+          unit_price: Number(it.unit_price) || 0,
+        })),
+      };
       if (editingInvoiceId) {
         await API.put(`/receivables/invoices/${editingInvoiceId}`, payload);
         setSuccess('Invoice updated successfully');
@@ -578,7 +586,7 @@ export default function Receivables() {
                       </div>
                       <div className="col-span-2 text-right">
                         <span className="text-xs text-gray-600 font-medium">
-                          {(item.quantity * item.unit_price).toLocaleString()}
+                          {((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)).toLocaleString()}
                         </span>
                         <button
                           type="button"
