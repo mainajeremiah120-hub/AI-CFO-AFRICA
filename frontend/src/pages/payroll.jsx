@@ -268,6 +268,17 @@ export default function Payroll() {
   const [payslips, setPayslips]               = useState({});
   const [loadingPayslips, setLoadingPayslips] = useState(false);
 
+  const [rates, setRates] = useState({
+    paye_rate: 0.20, nssf_amount: 2160, housing_levy_rate: 0.015,
+    nhif_brackets: [
+      { min_salary: 0, max_salary: 15000, amount: 150 },
+      { min_salary: 15001, max_salary: 30000, amount: 500 },
+      { min_salary: 30001, max_salary: 50000, amount: 850 },
+      { min_salary: 50001, max_salary: 100000, amount: 1200 },
+      { min_salary: 100001, max_salary: null, amount: 1700 },
+    ],
+  });
+
   const [editingEmployeeId, setEditingEmployeeId] = useState(null);
   const [empForm, setEmpForm] = useState({
     employee_number:'', full_name:'', email:'', phone:'',
@@ -278,7 +289,10 @@ export default function Payroll() {
     year:  new Date().getFullYear()
   });
 
-  useEffect(() => { fetchSummary(); }, []);
+  useEffect(() => {
+    fetchSummary();
+    API.get('/settings/statutory-rates').then(r => setRates(r.data)).catch(() => {});
+  }, []);
   useEffect(() => {
     if (tab === 'employees') fetchEmployees();
     if (tab === 'runs')      fetchRuns();
@@ -404,13 +418,14 @@ export default function Payroll() {
     printPayroll(run, slips);
   };
 
-  // Live deduction preview
+  // Live deduction preview — uses rates from Settings (falls back to defaults)
   const previewDeductions = (salary) => {
-    const s = Number(salary) || 0;
-    const paye = Math.round(s * 0.20);
-    const nssf = 2160;
-    const nhif = s > 100000 ? 1700 : s > 50000 ? 1200 : s > 30000 ? 850 : s > 15000 ? 500 : 150;
-    const housing = Math.round(s * 0.015);
+    const s    = Number(salary) || 0;
+    const paye = Math.round(s * Number(rates.paye_rate || 0.20));
+    const nssf = Number(rates.nssf_amount || 2160);
+    const brackets = (rates.nhif_brackets || []).slice().sort((a, b) => b.min_salary - a.min_salary);
+    const nhif = (brackets.find(b => s > b.min_salary) || brackets[brackets.length - 1])?.amount || 150;
+    const housing = Math.round(s * Number(rates.housing_levy_rate || 0.015));
     return { paye, nssf, nhif, housing, net: s - paye - nssf - nhif - housing };
   };
 

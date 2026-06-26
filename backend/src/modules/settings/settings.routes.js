@@ -12,6 +12,8 @@ import {
   deleteUser,
   resetTransactionData,
   seedDefaultAccounts,
+  getStatutoryRates,
+  updateStatutoryRates,
 } from './settings.controller.js';
 import { protect } from '../../middleware/auth.js';
 
@@ -40,5 +42,9 @@ router.post('/reset', resetTransactionData);
 
 // Seed default accounts for existing tenants
 router.post('/seed-accounts', seedDefaultAccounts);
+
+// Statutory payroll rates
+router.get('/statutory-rates', getStatutoryRates);
+router.put('/statutory-rates', updateStatutoryRates);
 
 export default router;

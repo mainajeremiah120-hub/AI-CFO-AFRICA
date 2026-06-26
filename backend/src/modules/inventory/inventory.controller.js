@@ -1,5 +1,22 @@
 import pool from '../../config/db.js';
 
+// Auto-add tax_exempt column to products if it doesn't exist yet
+const ensureTaxExemptColumn = async () => {
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='products' AND column_name='tax_exempt'
+      ) THEN
+        ALTER TABLE products ADD COLUMN tax_exempt BOOLEAN DEFAULT false;
+      END IF;
+    END $$;
+  `);
+};
+// Run once at startup
+ensureTaxExemptColumn().catch(e => console.error('tax_exempt migration:', e.message));
+
 // ─── WAREHOUSES ──────────────────────────────────────────
 
 export const createWarehouse = async (req, res) => {
@@ -65,14 +82,15 @@ export const deleteWarehouse = async (req, res) => {
 };
 
 export const createProduct = async (req, res) => {
-  const { sku, name, description, category, unit, cost_price, selling_price, reorder_level } = req.body;
+  const { sku, name, description, category, unit, cost_price, selling_price, reorder_level, tax_exempt } = req.body;
   const { tenantId } = req.user;
-
   try {
     const result = await pool.query(
-      `INSERT INTO products (tenant_id, sku, name, description, category, unit, cost_price, selling_price, reorder_level)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [tenantId, sku, name, description, category, unit || 'pcs', cost_price || 0, selling_price || 0, reorder_level || 0]
+      `INSERT INTO products
+         (tenant_id, sku, name, description, category, unit, cost_price, selling_price, reorder_level, tax_exempt)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [tenantId, sku, name, description, category, unit || 'pcs',
+       cost_price || 0, selling_price || 0, reorder_level || 0, tax_exempt === true]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -82,13 +100,16 @@ export const createProduct = async (req, res) => {
 
 export const updateProduct = async (req, res) => {
   const { id } = req.params;
-  const { name, description, category, unit, cost_price, selling_price, reorder_level } = req.body;
+  const { name, description, category, unit, cost_price, selling_price, reorder_level, tax_exempt } = req.body;
   const { tenantId } = req.user;
   try {
     const result = await pool.query(
-      `UPDATE products SET name=$1, description=$2, category=$3, unit=$4, cost_price=$5, selling_price=$6, reorder_level=$7
-       WHERE id=$8 AND tenant_id=$9 RETURNING *`,
-      [name, description, category, unit, cost_price, selling_price, reorder_level, id, tenantId]
+      `UPDATE products
+       SET name=$1, description=$2, category=$3, unit=$4, cost_price=$5, selling_price=$6,
+           reorder_level=$7, tax_exempt=$8
+       WHERE id=$9 AND tenant_id=$10 RETURNING *`,
+      [name, description, category, unit, cost_price, selling_price,
+       reorder_level, tax_exempt === true, id, tenantId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Product not found' });
     res.json(result.rows[0]);

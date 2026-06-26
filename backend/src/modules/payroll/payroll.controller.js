@@ -59,33 +59,49 @@ export const deleteEmployee = async (req, res) => {
 };
 
 // ─── PAYROLL CALCULATION ─────────────────────────────────
-// Kenya statutory deductions (FY 2024/25):
-//   PAYE          : 20% flat (simplified — use graduated bands for production)
-//   NSSF          : KES 2,160 (Tier I + II new rates, capped)
-//   NHIF/SHA      : bracket-based
-//   Housing Levy  : 1.5% of gross (Affordable Housing Act 2023)
 
-const calculateDeductions = (basic_salary) => {
-  const salary = Number(basic_salary);
+const DEFAULT_RATES = {
+  paye_rate: 0.20,
+  nssf_amount: 2160,
+  housing_levy_rate: 0.015,
+  nhif_brackets: [
+    { min_salary: 0,      max_salary: 15000,  amount: 150  },
+    { min_salary: 15001,  max_salary: 30000,  amount: 500  },
+    { min_salary: 30001,  max_salary: 50000,  amount: 850  },
+    { min_salary: 50001,  max_salary: 100000, amount: 1200 },
+    { min_salary: 100001, max_salary: null,   amount: 1700 },
+  ],
+};
 
-  const paye = Math.round(salary * 0.20);
+const loadRates = async (tenantId) => {
+  try {
+    const res = await pool.query(
+      `SELECT statutory_rates FROM company_settings WHERE tenant_id=$1`,
+      [tenantId]
+    );
+    const stored = res.rows[0]?.statutory_rates;
+    return stored ? { ...DEFAULT_RATES, ...stored } : DEFAULT_RATES;
+  } catch {
+    return DEFAULT_RATES;
+  }
+};
 
-  const nssf = 2160; // Tier I (6% of 7,000) + Tier II (6% of 29,000) = 420 + 1,740
+const computeNhif = (salary, brackets) => {
+  const sorted = [...brackets].sort((a, b) => b.min_salary - a.min_salary);
+  for (const b of sorted) {
+    if (salary > b.min_salary) return b.amount;
+  }
+  return brackets[brackets.length - 1]?.amount || 150;
+};
 
-  // NHIF / SHA brackets
-  let nhif;
-  if (salary > 100000)      nhif = 1700;
-  else if (salary > 50000)  nhif = 1200;
-  else if (salary > 30000)  nhif = 850;
-  else if (salary > 15000)  nhif = 500;
-  else                      nhif = 150;
-
-  const housing_levy = Math.round(salary * 0.015); // Affordable Housing Levy 1.5%
-
+const calculateDeductions = (basic_salary, rates = DEFAULT_RATES) => {
+  const salary       = Number(basic_salary);
+  const paye         = Math.round(salary * Number(rates.paye_rate        || 0.20));
+  const nssf         = Number(rates.nssf_amount                          || 2160);
+  const nhif         = computeNhif(salary, rates.nhif_brackets || DEFAULT_RATES.nhif_brackets);
+  const housing_levy = Math.round(salary * Number(rates.housing_levy_rate || 0.015));
   const total_deductions = paye + nssf + nhif + housing_levy;
-  const net_pay = salary - total_deductions;
-
-  return { paye, nssf, nhif, housing_levy, total_deductions, net_pay };
+  return { paye, nssf, nhif, housing_levy, total_deductions, net_pay: salary - total_deductions };
 };
 
 // ─── PAYROLL RUNS ────────────────────────────────────────
@@ -124,11 +140,14 @@ export const createPayrollRun = async (req, res) => {
     );
     const run = runResult.rows[0];
 
+    // Read statutory rates configured in Settings (falls back to defaults)
+    const rates = await loadRates(tenantId);
+
     let total_gross = 0, total_paye = 0, total_nssf = 0,
         total_nhif = 0, total_housing = 0, total_deductions = 0, total_net = 0;
 
     for (const emp of employees) {
-      const d = calculateDeductions(emp.basic_salary);
+      const d = calculateDeductions(emp.basic_salary, rates);
 
       // other_deductions stores the housing levy
       await client.query(

@@ -22,7 +22,7 @@ export default function Inventory() {
   // Product form
   const [productForm, setProductForm] = useState({
     sku: '', name: '', description: '', category: '', unit: 'pcs',
-    cost_price: '', selling_price: '', reorder_level: ''
+    cost_price: '', selling_price: '', reorder_level: '', tax_exempt: false
   });
 
   // Movement form
@@ -91,7 +91,7 @@ export default function Inventory() {
         await API.post('/inventory/products', payload);
         setSuccess('Product created successfully');
       }
-      setProductForm({ sku: '', name: '', description: '', category: '', unit: 'pcs', cost_price: '', selling_price: '', reorder_level: '' });
+      setProductForm({ sku: '', name: '', description: '', category: '', unit: 'pcs', cost_price: '', selling_price: '', reorder_level: '', tax_exempt: false });
       fetchProducts();
       fetchSummary();
       setTimeout(() => setSuccess(''), 3000);
@@ -109,6 +109,7 @@ export default function Inventory() {
       category: p.category || '', unit: p.unit,
       cost_price: p.cost_price, selling_price: p.selling_price,
       reorder_level: p.reorder_level,
+      tax_exempt: p.tax_exempt === true,
     });
   };
 
@@ -277,7 +278,10 @@ export default function Inventory() {
                   products.slice(0, 8).map(p => (
                     <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="py-2.5 px-3 font-mono text-gray-600">{p.sku}</td>
-                      <td className="py-2.5 px-3 text-gray-800">{p.name}</td>
+                      <td className="py-2.5 px-3 text-gray-800">
+                        {p.name}
+                        {p.tax_exempt && <span className="ml-1.5 px-1.5 py-0.5 bg-purple-100 text-purple-700 text-xs rounded font-medium">VAT Exempt</span>}
+                      </td>
                       <td className="py-2.5 px-3 text-right font-medium">{Number(p.total_stock).toLocaleString()} {p.unit}</td>
                       <td className="py-2.5 px-3 text-right text-gray-500">{Number(p.reorder_level).toLocaleString()}</td>
                       <td className="py-2.5 px-3 text-center">
@@ -306,7 +310,7 @@ export default function Inventory() {
               </h2>
               {editingProductId && (
                 <button
-                  onClick={() => { setEditingProductId(null); setProductForm({ sku: '', name: '', description: '', category: '', unit: 'pcs', cost_price: '', selling_price: '', reorder_level: '' }); }}
+                  onClick={() => { setEditingProductId(null); setProductForm({ sku: '', name: '', description: '', category: '', unit: 'pcs', cost_price: '', selling_price: '', reorder_level: '', tax_exempt: false }); }}
                   className="text-xs text-gray-500 hover:text-gray-700 underline"
                 >
                   Cancel
@@ -408,6 +412,21 @@ export default function Inventory() {
                   placeholder="Optional"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
+              </div>
+
+              {/* VAT / Tax Exemption */}
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                <div>
+                  <p className="text-sm font-medium text-gray-700">VAT Exempt</p>
+                  <p className="text-xs text-gray-400">Tick if this product is zero-rated or exempt (e.g. basic foods, mosquito nets, medicine)</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setProductForm({ ...productForm, tax_exempt: !productForm.tax_exempt })}
+                  className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${productForm.tax_exempt ? 'bg-green-500' : 'bg-gray-300'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${productForm.tax_exempt ? 'translate-x-5' : ''}`} />
+                </button>
               </div>
 
               <button

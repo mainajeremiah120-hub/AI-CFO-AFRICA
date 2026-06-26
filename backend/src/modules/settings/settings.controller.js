@@ -3,6 +3,67 @@ import bcrypt from 'bcryptjs';
 import { sendWelcomeEmail, sendUserUpdateEmail } from '../../config/mailer.js';
 import { seedAccounts } from '../auth/auth.controller.js';
 
+// ─── STATUTORY RATES ─────────────────────────────────────
+// Stored as JSONB in company_settings.statutory_rates.
+// Column is auto-created on first access.
+
+const DEFAULT_RATES = {
+  paye_rate: 0.20,
+  nssf_amount: 2160,
+  housing_levy_rate: 0.015,
+  nhif_brackets: [
+    { min_salary: 0,      max_salary: 15000,  amount: 150  },
+    { min_salary: 15001,  max_salary: 30000,  amount: 500  },
+    { min_salary: 30001,  max_salary: 50000,  amount: 850  },
+    { min_salary: 50001,  max_salary: 100000, amount: 1200 },
+    { min_salary: 100001, max_salary: null,   amount: 1700 },
+  ],
+};
+
+const ensureStatutoryRatesColumn = async () => {
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='company_settings' AND column_name='statutory_rates'
+      ) THEN
+        ALTER TABLE company_settings ADD COLUMN statutory_rates JSONB;
+      END IF;
+    END $$;
+  `);
+};
+
+export const getStatutoryRates = async (req, res) => {
+  const { tenantId } = req.user;
+  try {
+    await ensureStatutoryRatesColumn();
+    const result = await pool.query(
+      `SELECT statutory_rates FROM company_settings WHERE tenant_id=$1`,
+      [tenantId]
+    );
+    const stored = result.rows[0]?.statutory_rates;
+    res.json(stored ? { ...DEFAULT_RATES, ...stored } : DEFAULT_RATES);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const updateStatutoryRates = async (req, res) => {
+  const { tenantId } = req.user;
+  const rates = req.body;
+  try {
+    await ensureStatutoryRatesColumn();
+    await pool.query(
+      `UPDATE company_settings SET statutory_rates=$1, updated_at=NOW() WHERE tenant_id=$2`,
+      [rates, tenantId]
+    );
+    res.json({ message: 'Statutory rates updated', rates });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 export const seedDefaultAccounts = async (req, res) => {
   try {
     await seedAccounts(req.user.tenantId);

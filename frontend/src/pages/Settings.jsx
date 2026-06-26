@@ -67,6 +67,20 @@ export default function Settings() {
   // Profile form
   const [profileForm, setProfileForm] = useState({ name: '', email: '' });
 
+  // Statutory rates form
+  const [ratesForm, setRatesForm] = useState({
+    paye_rate: 0.20,
+    nssf_amount: 2160,
+    housing_levy_rate: 0.015,
+    nhif_brackets: [
+      { min_salary: 0,      max_salary: 15000,  amount: 150  },
+      { min_salary: 15001,  max_salary: 30000,  amount: 500  },
+      { min_salary: 30001,  max_salary: 50000,  amount: 850  },
+      { min_salary: 50001,  max_salary: 100000, amount: 1200 },
+      { min_salary: 100001, max_salary: null,   amount: 1700 },
+    ],
+  });
+
   // Password form
   const [passwordForm, setPasswordForm] = useState({
     current_password: '', new_password: '', confirm_password: ''
@@ -81,11 +95,38 @@ export default function Settings() {
     fetchSettings();
     fetchProfile();
     fetchUsers();
+    fetchStatutoryRates();
   }, []);
 
   useEffect(() => {
     if (tab === 'master') fetchMasterData();
   }, [tab, masterTab]);
+
+  const fetchStatutoryRates = async () => {
+    try {
+      const res = await API.get('/settings/statutory-rates');
+      setRatesForm(res.data);
+    } catch { /* silently use defaults */ }
+  };
+
+  const handleUpdateStatutoryRates = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await API.put('/settings/statutory-rates', ratesForm);
+      showMessage('Statutory rates updated successfully');
+    } catch (err) {
+      showMessage(err.response?.data?.error || 'Failed to update statutory rates', true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateBracket = (index, field, value) => {
+    const brackets = [...ratesForm.nhif_brackets];
+    brackets[index] = { ...brackets[index], [field]: value === '' ? null : Number(value) };
+    setRatesForm({ ...ratesForm, nhif_brackets: brackets });
+  };
 
   const fetchSettings = async () => {
     try {
@@ -357,6 +398,7 @@ export default function Settings() {
   const tabs = [
     { key: 'company', label: '🏢 Company' },
     { key: 'financial', label: '💰 Financial' },
+    { key: 'statutory', label: '📋 Statutory Rates' },
     { key: 'pos', label: '🛒 POS & Receipt' },
     { key: 'notifications', label: '🔔 Notifications' },
     { key: 'profile', label: '👤 My Profile' },
@@ -1081,6 +1123,153 @@ export default function Settings() {
               </table>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ── STATUTORY RATES ── */}
+      {tab === 'statutory' && (
+        <div className="max-w-2xl space-y-6">
+          <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-700">
+            These rates are used for all new payroll runs. Existing processed payrolls are not affected.
+            Rates are sourced from Kenya Revenue Authority (KRA) and relevant Acts.
+          </div>
+
+          <form onSubmit={handleUpdateStatutoryRates} className="space-y-6">
+
+            {/* PAYE */}
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+              <h2 className="text-sm font-semibold text-gray-800 mb-1">PAYE — Income Tax</h2>
+              <p className="text-xs text-gray-400 mb-4">Applied as a flat percentage of gross salary (simplified). Update when KRA changes the rate.</p>
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">PAYE Rate (%)</label>
+                  <input
+                    type="number" min="0" max="100" step="0.01"
+                    value={Number((ratesForm.paye_rate || 0) * 100).toFixed(2)}
+                    onChange={e => setRatesForm({ ...ratesForm, paye_rate: Number(e.target.value) / 100 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+                <div className="flex-1 bg-gray-50 rounded-lg px-4 py-3 text-center">
+                  <p className="text-xs text-gray-500">Current Rate</p>
+                  <p className="text-2xl font-bold text-orange-600">{Number((ratesForm.paye_rate || 0) * 100).toFixed(1)}%</p>
+                </div>
+              </div>
+            </div>
+
+            {/* NSSF */}
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+              <h2 className="text-sm font-semibold text-gray-800 mb-1">NSSF — Pension Contribution</h2>
+              <p className="text-xs text-gray-400 mb-4">Fixed monthly amount per employee (Tier I + Tier II combined cap under the NSSF Act 2013).</p>
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">NSSF Amount (KES / month)</label>
+                  <input
+                    type="number" min="0" step="1"
+                    value={ratesForm.nssf_amount || 2160}
+                    onChange={e => setRatesForm({ ...ratesForm, nssf_amount: Number(e.target.value) })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+                <div className="flex-1 bg-gray-50 rounded-lg px-4 py-3 text-center">
+                  <p className="text-xs text-gray-500">Monthly Deduction</p>
+                  <p className="text-2xl font-bold text-blue-600">KES {Number(ratesForm.nssf_amount || 2160).toLocaleString()}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Housing Levy */}
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+              <h2 className="text-sm font-semibold text-gray-800 mb-1">Affordable Housing Levy</h2>
+              <p className="text-xs text-gray-400 mb-4">Percentage of gross salary deducted per the Housing Levy Act 2023.</p>
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Housing Levy Rate (%)</label>
+                  <input
+                    type="number" min="0" max="100" step="0.01"
+                    value={Number((ratesForm.housing_levy_rate || 0) * 100).toFixed(2)}
+                    onChange={e => setRatesForm({ ...ratesForm, housing_levy_rate: Number(e.target.value) / 100 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+                <div className="flex-1 bg-gray-50 rounded-lg px-4 py-3 text-center">
+                  <p className="text-xs text-gray-500">Current Rate</p>
+                  <p className="text-2xl font-bold text-teal-600">{Number((ratesForm.housing_levy_rate || 0) * 100).toFixed(1)}%</p>
+                </div>
+              </div>
+            </div>
+
+            {/* NHIF Brackets */}
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+              <h2 className="text-sm font-semibold text-gray-800 mb-1">NHIF / SHA — Health Insurance Brackets</h2>
+              <p className="text-xs text-gray-400 mb-4">
+                Monthly deduction based on gross salary range. Adjust when the government updates the NHIF/SHA contribution table.
+                Brackets are evaluated from highest min_salary down.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-50 text-gray-600">
+                      <th className="text-left px-3 py-2 font-semibold">Min Salary (KES)</th>
+                      <th className="text-left px-3 py-2 font-semibold">Max Salary (KES)</th>
+                      <th className="text-left px-3 py-2 font-semibold">NHIF Amount (KES)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(ratesForm.nhif_brackets || []).map((b, i) => (
+                      <tr key={i} className="border-t border-gray-100">
+                        <td className="px-2 py-1.5">
+                          <input
+                            type="number" min="0"
+                            value={b.min_salary ?? 0}
+                            onChange={e => updateBracket(i, 'min_salary', e.target.value)}
+                            className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-red-400"
+                          />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <input
+                            type="number" min="0"
+                            value={b.max_salary ?? ''}
+                            placeholder="No limit"
+                            onChange={e => updateBracket(i, 'max_salary', e.target.value)}
+                            className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-red-400"
+                          />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <input
+                            type="number" min="0"
+                            value={b.amount ?? 0}
+                            onChange={e => updateBracket(i, 'amount', e.target.value)}
+                            className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-red-400"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex gap-2 mt-3">
+                <button type="button"
+                  onClick={() => setRatesForm({ ...ratesForm, nhif_brackets: [...(ratesForm.nhif_brackets||[]), { min_salary: 0, max_salary: null, amount: 0 }] })}
+                  className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg font-medium">
+                  + Add Bracket
+                </button>
+                {ratesForm.nhif_brackets?.length > 1 && (
+                  <button type="button"
+                    onClick={() => setRatesForm({ ...ratesForm, nhif_brackets: ratesForm.nhif_brackets.slice(0, -1) })}
+                    className="text-xs px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg font-medium">
+                    Remove Last
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <button type="submit" disabled={loading}
+              className="w-full text-white font-medium py-2.5 rounded-lg text-sm disabled:opacity-50"
+              style={{ backgroundColor: '#a31b32' }}>
+              {loading ? 'Saving…' : 'Save Statutory Rates'}
+            </button>
+          </form>
         </div>
       )}
 
