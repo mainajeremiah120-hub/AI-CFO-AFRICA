@@ -18,6 +18,7 @@ export default function Banking() {
     account_name: '', account_number: '', bank_name: '',
     account_type: 'bank', current_balance: ''
   });
+  const [editingAccountId, setEditingAccountId] = useState(null);
 
   // Transaction form
   const [transactionForm, setTransactionForm] = useState({
@@ -94,24 +95,55 @@ export default function Banking() {
     }
   };
 
+  const blankAccountForm = () => ({ account_name: '', account_number: '', bank_name: '', account_type: 'bank', current_balance: '' });
+
   const handleCreateAccount = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      await API.post('/banking/accounts', {
-        ...accountForm,
-        current_balance: Number(accountForm.current_balance) || 0
-      });
-      setSuccess('Bank account created successfully');
-      setAccountForm({ account_name: '', account_number: '', bank_name: '', account_type: 'bank', current_balance: '' });
+      const payload = { ...accountForm, current_balance: Number(accountForm.current_balance) || 0 };
+      if (editingAccountId) {
+        await API.put(`/banking/accounts/${editingAccountId}`, payload);
+        setSuccess('Bank account updated successfully');
+        setEditingAccountId(null);
+      } else {
+        await API.post('/banking/accounts', payload);
+        setSuccess('Bank account created successfully');
+      }
+      setAccountForm(blankAccountForm());
       fetchBankAccounts();
       fetchSummary();
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create bank account');
+      setError(err.response?.data?.error || 'Failed to save bank account');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleEditAccount = (acc) => {
+    setEditingAccountId(acc.id);
+    setAccountForm({
+      account_name: acc.account_name,
+      account_number: acc.account_number || '',
+      bank_name: acc.bank_name || '',
+      account_type: acc.account_type || 'bank',
+      current_balance: acc.current_balance,
+    });
+    setTab('accounts');
+  };
+
+  const handleDeleteAccount = async (id) => {
+    if (!window.confirm('Delete this bank account? This will hide it from all views.')) return;
+    try {
+      await API.delete(`/banking/accounts/${id}`);
+      setSuccess('Account deleted');
+      fetchBankAccounts();
+      fetchSummary();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete account');
     }
   };
 
@@ -278,6 +310,10 @@ export default function Banking() {
                     {acc.account_number && (
                       <p className="text-xs text-gray-400 mt-1">Acc: {acc.account_number}</p>
                     )}
+                    <div className="flex gap-3 mt-2 pt-2 border-t border-gray-50">
+                      <button onClick={() => handleEditAccount(acc)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
+                      <button onClick={() => handleDeleteAccount(acc.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
+                    </div>
                   </div>
                 ))
               )}
@@ -290,7 +326,9 @@ export default function Banking() {
       {tab === 'accounts' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-            <h2 className="text-base font-semibold text-gray-800 mb-4">New Bank Account</h2>
+            <h2 className="text-base font-semibold text-gray-800 mb-4">
+              {editingAccountId ? 'Edit Bank Account' : 'New Bank Account'}
+            </h2>
             <form onSubmit={handleCreateAccount} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
@@ -343,14 +381,23 @@ export default function Banking() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
               </div>
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full text-white font-medium py-2 rounded-lg text-sm transition disabled:opacity-50"
-                style={{ backgroundColor: '#a31b32' }}
-              >
-                {loading ? 'Creating...' : 'Create Account'}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 text-white font-medium py-2 rounded-lg text-sm transition disabled:opacity-50"
+                  style={{ backgroundColor: '#a31b32' }}
+                >
+                  {loading ? 'Saving...' : editingAccountId ? 'Update Account' : 'Create Account'}
+                </button>
+                {editingAccountId && (
+                  <button
+                    type="button"
+                    onClick={() => { setEditingAccountId(null); setAccountForm(blankAccountForm()); }}
+                    className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >Cancel</button>
+                )}
+              </div>
             </form>
           </div>
 
@@ -363,17 +410,23 @@ export default function Banking() {
                 <p className="text-center text-gray-400 text-sm py-8">No accounts yet</p>
               ) : (
                 bankAccounts.map(acc => (
-                  <div key={acc.id} className="border border-gray-100 rounded-xl p-4 flex justify-between items-center">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-800">{acc.account_name}</p>
-                      <p className="text-xs text-gray-400">{acc.bank_name} {acc.account_number ? `· ${acc.account_number}` : ''}</p>
-                      <span className={`mt-1 inline-block px-2 py-0.5 rounded-full text-xs font-medium ${accountTypeColor(acc.account_type)}`}>
-                        {acc.account_type}
-                      </span>
+                  <div key={acc.id} className="border border-gray-100 rounded-xl p-4">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">{acc.account_name}</p>
+                        <p className="text-xs text-gray-400">{acc.bank_name} {acc.account_number ? `· ${acc.account_number}` : ''}</p>
+                        <span className={`mt-1 inline-block px-2 py-0.5 rounded-full text-xs font-medium ${accountTypeColor(acc.account_type)}`}>
+                          {acc.account_type}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-bold text-gray-800">KES {Number(acc.current_balance).toLocaleString()}</p>
+                        <p className="text-xs text-gray-400">Current balance</p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-lg font-bold text-gray-800">KES {Number(acc.current_balance).toLocaleString()}</p>
-                      <p className="text-xs text-gray-400">Current balance</p>
+                    <div className="flex gap-3 pt-2 border-t border-gray-50">
+                      <button onClick={() => handleEditAccount(acc)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
+                      <button onClick={() => handleDeleteAccount(acc.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
                     </div>
                   </div>
                 ))

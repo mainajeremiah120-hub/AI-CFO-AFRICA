@@ -54,6 +54,75 @@ export const createBankAccount = async (req, res) => {
   }
 };
 
+export const updateBankAccount = async (req, res) => {
+  const { id } = req.params;
+  const { account_name, account_number, bank_name, account_type, current_balance } = req.body;
+  const { tenantId, userId } = req.user;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const existing = (await client.query(
+      `SELECT * FROM bank_accounts WHERE id=$1 AND tenant_id=$2`, [id, tenantId]
+    )).rows[0];
+    if (!existing) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Account not found' }); }
+
+    // If balance changed, post an adjustment journal entry
+    const newBalance = Number(current_balance);
+    const diff = newBalance - Number(existing.current_balance);
+    if (diff !== 0) {
+      const accountCode = (account_type || existing.account_type) === 'cash' ? '1001' : '1002';
+      const glAccount = (await client.query(
+        `SELECT id FROM accounts WHERE tenant_id=$1 AND code=$2`, [tenantId, accountCode]
+      )).rows[0];
+      if (glAccount) {
+        const entry = (await client.query(
+          `INSERT INTO journal_entries (tenant_id, date, description, reference, created_by)
+           VALUES ($1, CURRENT_DATE, $2, $3, $4) RETURNING *`,
+          [tenantId, `Balance adjustment — ${account_name || existing.account_name}`, `ADJ-${id}`, userId]
+        )).rows[0];
+        if (diff > 0) {
+          await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,$3,0)`, [entry.id, glAccount.id, diff]);
+          await client.query(`UPDATE accounts SET balance=balance+$1 WHERE id=$2`, [diff, glAccount.id]);
+        } else {
+          await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,0,$3)`, [entry.id, glAccount.id, Math.abs(diff)]);
+          await client.query(`UPDATE accounts SET balance=balance-$1 WHERE id=$2`, [Math.abs(diff), glAccount.id]);
+        }
+      }
+    }
+
+    const result = await client.query(
+      `UPDATE bank_accounts SET account_name=$1, account_number=$2, bank_name=$3, account_type=$4, current_balance=$5
+       WHERE id=$6 AND tenant_id=$7 RETURNING *`,
+      [account_name || existing.account_name, account_number ?? existing.account_number,
+       bank_name ?? existing.bank_name, account_type || existing.account_type,
+       newBalance, id, tenantId]
+    );
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+};
+
+export const deleteBankAccount = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `UPDATE bank_accounts SET is_active=false WHERE id=$1 AND tenant_id=$2 RETURNING id`,
+      [id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Account not found' });
+    res.json({ message: 'Account deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 export const getBankAccounts = async (req, res) => {
   const { tenantId } = req.user;
 

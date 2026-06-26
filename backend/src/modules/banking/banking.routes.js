@@ -1,6 +1,6 @@
 import express from 'express';
 import {
-  createBankAccount, getBankAccounts,
+  createBankAccount, getBankAccounts, updateBankAccount, deleteBankAccount,
   createTransaction, getTransactions, reconcileTransaction, updateTransaction, deleteTransaction,
   createMpesaTransaction, getMpesaTransactions, deleteMpesaTransaction,
   getBankingSummary,
@@ -12,6 +12,8 @@ router.use(protect);
 
 router.post('/accounts', createBankAccount);
 router.get('/accounts', getBankAccounts);
+router.put('/accounts/:id', updateBankAccount);
+router.delete('/accounts/:id', deleteBankAccount);
 
 router.post('/transactions', createTransaction);
 router.get('/transactions', getTransactions);
