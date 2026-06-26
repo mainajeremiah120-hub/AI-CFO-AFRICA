@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -12,15 +13,25 @@ import payablesRoutes from './src/modules/payables/payables.routes.js';
 import inventoryRoutes from './src/modules/inventory/inventory.routes.js';
 import payrollRoutes from './src/modules/payroll/payroll.routes.js';
 import procurementRoutes from './src/modules/procurement/procurement.routes.js';
-import bankingRoutes from './src/modules/banking/banking.routes.js'
+import bankingRoutes from './src/modules/banking/banking.routes.js';
 import analyticsRoutes from './src/modules/analytics/analytics.routes.js';
 import posRoutes from './src/modules/pos/pos.routes.js';
 import settingsRoutes from './src/modules/settings/settings.routes.js';
 
 const app = express();
-app.use(cors());
-app.use(express.json());
 
+// ── Gzip compress all responses (cuts JSON payload 60-80%) ──
+app.use(compression({ level: 6, threshold: 1024 }));
+
+app.use(cors());
+
+// ── Parse JSON bodies up to 2mb ──
+app.use(express.json({ limit: '2mb' }));
+
+// ── Disable X-Powered-By header ──
+app.disable('x-powered-by');
+
+// ── Routes ──
 app.use('/api/auth', authRoutes);
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/receivables', receivablesRoutes);
@@ -33,9 +44,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/pos', posRoutes);
 app.use('/api/settings', settingsRoutes);
 
-
 import { protect } from './src/middleware/auth.js';
-
 
 app.get('/api/me', protect, (req, res) => {
   res.json({ message: 'Protected route works', user: req.user });

@@ -12,6 +12,10 @@ export default function Inventory() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  // Edit state
+  const [editingProductId, setEditingProductId] = useState(null);
+  const [editingWarehouseId, setEditingWarehouseId] = useState(null);
+
   // Warehouse form
   const [warehouseForm, setWarehouseForm] = useState({ name: '', location: '' });
 
@@ -43,95 +47,136 @@ export default function Inventory() {
     try {
       const res = await API.get('/inventory/summary');
       setSummary(res.data);
-    } catch (err) {
-      setError('Failed to load summary');
-    }
+    } catch { setError('Failed to load summary'); }
   };
 
   const fetchWarehouses = async () => {
     try {
       const res = await API.get('/inventory/warehouses');
       setWarehouses(res.data);
-    } catch (err) {
-      setError('Failed to load warehouses');
-    }
+    } catch { setError('Failed to load warehouses'); }
   };
 
   const fetchProducts = async () => {
     try {
       const res = await API.get('/inventory/products');
       setProducts(res.data);
-    } catch (err) {
-      setError('Failed to fetch products');
-    }
+    } catch { setError('Failed to fetch products'); }
   };
 
   const fetchMovements = async () => {
     try {
       const res = await API.get('/inventory/movements');
       setMovements(res.data);
-    } catch (err) {
-      setError('Failed to fetch movements');
-    }
+    } catch { setError('Failed to fetch movements'); }
   };
 
-  const handleCreateWarehouse = async (e) => {
+  // ── PRODUCT handlers ──
+  const handleSaveProduct = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    const payload = {
+      ...productForm,
+      cost_price: Number(productForm.cost_price) || 0,
+      selling_price: Number(productForm.selling_price) || 0,
+      reorder_level: Number(productForm.reorder_level) || 0,
+    };
     try {
-      await API.post('/inventory/warehouses', warehouseForm);
-      setSuccess('Warehouse created successfully');
-      setWarehouseForm({ name: '', location: '' });
-      fetchWarehouses();
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create warehouse');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCreateProduct = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-    try {
-      await API.post('/inventory/products', {
-        ...productForm,
-        cost_price: Number(productForm.cost_price) || 0,
-        selling_price: Number(productForm.selling_price) || 0,
-        reorder_level: Number(productForm.reorder_level) || 0,
-      });
-      setSuccess('Product created successfully');
-      setProductForm({
-        sku: '', name: '', description: '', category: '', unit: 'pcs',
-        cost_price: '', selling_price: '', reorder_level: ''
-      });
+      if (editingProductId) {
+        await API.put(`/inventory/products/${editingProductId}`, payload);
+        setSuccess('Product updated successfully');
+        setEditingProductId(null);
+      } else {
+        await API.post('/inventory/products', payload);
+        setSuccess('Product created successfully');
+      }
+      setProductForm({ sku: '', name: '', description: '', category: '', unit: 'pcs', cost_price: '', selling_price: '', reorder_level: '' });
       fetchProducts();
       fetchSummary();
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create product');
+      setError(err.response?.data?.error || 'Failed to save product');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleEditProduct = (p) => {
+    setEditingProductId(p.id);
+    setProductForm({
+      sku: p.sku, name: p.name, description: p.description || '',
+      category: p.category || '', unit: p.unit,
+      cost_price: p.cost_price, selling_price: p.selling_price,
+      reorder_level: p.reorder_level,
+    });
+  };
+
+  const handleDeleteProduct = async (id) => {
+    if (!window.confirm('Delete this product? This cannot be undone.')) return;
+    setError('');
+    try {
+      await API.delete(`/inventory/products/${id}`);
+      setSuccess('Product deleted');
+      fetchProducts();
+      fetchSummary();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete product');
+    }
+  };
+
+  // ── WAREHOUSE handlers ──
+  const handleSaveWarehouse = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      if (editingWarehouseId) {
+        await API.put(`/inventory/warehouses/${editingWarehouseId}`, warehouseForm);
+        setSuccess('Warehouse updated successfully');
+        setEditingWarehouseId(null);
+      } else {
+        await API.post('/inventory/warehouses', warehouseForm);
+        setSuccess('Warehouse created successfully');
+      }
+      setWarehouseForm({ name: '', location: '' });
+      fetchWarehouses();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to save warehouse');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditWarehouse = (w) => {
+    setEditingWarehouseId(w.id);
+    setWarehouseForm({ name: w.name, location: w.location || '' });
+  };
+
+  const handleDeleteWarehouse = async (id) => {
+    if (!window.confirm('Delete this warehouse?')) return;
+    setError('');
+    try {
+      await API.delete(`/inventory/warehouses/${id}`);
+      setSuccess('Warehouse deleted');
+      fetchWarehouses();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete warehouse');
+    }
+  };
+
+  // ── MOVEMENT handlers ──
   const handleCreateMovement = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      await API.post('/inventory/movements', {
-        ...movementForm,
-        quantity: Number(movementForm.quantity),
-      });
+      await API.post('/inventory/movements', { ...movementForm, quantity: Number(movementForm.quantity) });
       setSuccess('Stock movement recorded successfully');
-      setMovementForm({
-        product_id: '', warehouse_id: '', movement_type: 'in',
-        quantity: '', reason: '', reference: ''
-      });
+      setMovementForm({ product_id: '', warehouse_id: '', movement_type: 'in', quantity: '', reason: '', reference: '' });
       fetchMovements();
       fetchProducts();
       fetchSummary();
@@ -140,6 +185,21 @@ export default function Inventory() {
       setError(err.response?.data?.error || 'Failed to record movement');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteMovement = async (id) => {
+    if (!window.confirm('Delete this stock movement?')) return;
+    setError('');
+    try {
+      await API.delete(`/inventory/movements/${id}`);
+      setSuccess('Movement deleted');
+      fetchMovements();
+      fetchProducts();
+      fetchSummary();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete movement');
     }
   };
 
@@ -166,7 +226,7 @@ export default function Inventory() {
         {tabs.map(t => (
           <button
             key={t.key}
-            onClick={() => { setTab(t.key); setError(''); setSuccess(''); }}
+            onClick={() => { setTab(t.key); setError(''); setSuccess(''); setEditingProductId(null); setEditingWarehouseId(null); }}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition ${
               tab === t.key
                 ? 'border-primary-700 text-primary-700'
@@ -198,7 +258,6 @@ export default function Inventory() {
             ))}
           </div>
 
-          {/* Products needing attention */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
             <h2 className="text-base font-semibold text-gray-800 mb-4">Stock Levels</h2>
             <table className="w-full text-sm">
@@ -239,10 +298,22 @@ export default function Inventory() {
       {tab === 'products' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-          {/* Create Product */}
+          {/* Create / Edit Product */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-            <h2 className="text-base font-semibold text-gray-800 mb-4">New Product</h2>
-            <form onSubmit={handleCreateProduct} className="space-y-4">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-base font-semibold text-gray-800">
+                {editingProductId ? 'Edit Product' : 'New Product'}
+              </h2>
+              {editingProductId && (
+                <button
+                  onClick={() => { setEditingProductId(null); setProductForm({ sku: '', name: '', description: '', category: '', unit: 'pcs', cost_price: '', selling_price: '', reorder_level: '' }); }}
+                  className="text-xs text-gray-500 hover:text-gray-700 underline"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+            <form onSubmit={handleSaveProduct} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">SKU</label>
@@ -287,7 +358,7 @@ export default function Inventory() {
                 <input
                   value={productForm.category}
                   onChange={e => setProductForm({ ...productForm, category: e.target.value })}
-                  placeholder="e.g. HP"
+                  placeholder="e.g. Electronics"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
               </div>
@@ -345,7 +416,7 @@ export default function Inventory() {
                 className="w-full text-white font-medium py-2 rounded-lg text-sm transition disabled:opacity-50"
                 style={{ backgroundColor: '#a31b32' }}
               >
-                {loading ? 'Creating...' : 'Create Product'}
+                {loading ? 'Saving...' : editingProductId ? 'Update Product' : 'Create Product'}
               </button>
             </form>
           </div>
@@ -360,7 +431,7 @@ export default function Inventory() {
                 <p className="text-center text-gray-400 text-sm py-8">No products yet</p>
               ) : (
                 products.map(p => (
-                  <div key={p.id} className="border border-gray-100 rounded-lg p-4">
+                  <div key={p.id} className={`border rounded-lg p-4 transition ${editingProductId === p.id ? 'border-blue-300 bg-blue-50' : 'border-gray-100'}`}>
                     <div className="flex justify-between items-start mb-2">
                       <div>
                         <p className="text-sm font-semibold text-gray-800">{p.name}</p>
@@ -373,6 +444,20 @@ export default function Inventory() {
                     <div className="flex justify-between text-xs text-gray-600 mt-2">
                       <span>Cost: <strong>KES {Number(p.cost_price).toLocaleString()}</strong></span>
                       <span>Sell: <strong className="text-green-600">KES {Number(p.selling_price).toLocaleString()}</strong></span>
+                    </div>
+                    <div className="flex gap-3 mt-3 pt-2 border-t border-gray-100">
+                      <button
+                        onClick={() => handleEditProduct(p)}
+                        className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDeleteProduct(p.id)}
+                        className="text-xs text-red-500 hover:text-red-700 font-medium"
+                      >
+                        Delete
+                      </button>
                     </div>
                   </div>
                 ))
@@ -461,7 +546,7 @@ export default function Inventory() {
                 <input
                   value={movementForm.reference}
                   onChange={e => setMovementForm({ ...movementForm, reference: e.target.value })}
-                  placeholder="e.g.Invoice #"
+                  placeholder="e.g. Invoice #"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
               </div>
@@ -504,6 +589,14 @@ export default function Inventory() {
                       <span>{new Date(m.created_at).toLocaleDateString()}</span>
                     </div>
                     {m.reference && <p className="text-xs text-gray-400 mt-1">Ref: {m.reference}</p>}
+                    <div className="mt-2 pt-2 border-t border-gray-100">
+                      <button
+                        onClick={() => handleDeleteMovement(m.id)}
+                        className="text-xs text-red-500 hover:text-red-700 font-medium"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 ))
               )}
@@ -516,8 +609,20 @@ export default function Inventory() {
       {tab === 'warehouses' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-            <h2 className="text-base font-semibold text-gray-800 mb-4">New Warehouse</h2>
-            <form onSubmit={handleCreateWarehouse} className="space-y-4">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-base font-semibold text-gray-800">
+                {editingWarehouseId ? 'Edit Warehouse' : 'New Warehouse'}
+              </h2>
+              {editingWarehouseId && (
+                <button
+                  onClick={() => { setEditingWarehouseId(null); setWarehouseForm({ name: '', location: '' }); }}
+                  className="text-xs text-gray-500 hover:text-gray-700 underline"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+            <form onSubmit={handleSaveWarehouse} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
                 <input
@@ -543,7 +648,7 @@ export default function Inventory() {
                 className="w-full text-white font-medium py-2 rounded-lg text-sm transition disabled:opacity-50"
                 style={{ backgroundColor: '#a31b32' }}
               >
-                {loading ? 'Creating...' : 'Create Warehouse'}
+                {loading ? 'Saving...' : editingWarehouseId ? 'Update Warehouse' : 'Create Warehouse'}
               </button>
             </form>
           </div>
@@ -557,16 +662,31 @@ export default function Inventory() {
                 <tr className="border-b border-gray-100">
                   <th className="text-left py-2 px-3 text-gray-500 font-medium">Name</th>
                   <th className="text-left py-2 px-3 text-gray-500 font-medium">Location</th>
+                  <th className="text-right py-2 px-3 text-gray-500 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {warehouses.length === 0 ? (
-                  <tr><td colSpan="2" className="text-center py-8 text-gray-400">No warehouses yet</td></tr>
+                  <tr><td colSpan="3" className="text-center py-8 text-gray-400">No warehouses yet</td></tr>
                 ) : (
                   warehouses.map(w => (
-                    <tr key={w.id} className="border-b border-gray-50 hover:bg-gray-50">
+                    <tr key={w.id} className={`border-b border-gray-50 hover:bg-gray-50 ${editingWarehouseId === w.id ? 'bg-blue-50' : ''}`}>
                       <td className="py-2.5 px-3 font-medium text-gray-800">{w.name}</td>
                       <td className="py-2.5 px-3 text-gray-500">{w.location || '—'}</td>
+                      <td className="py-2.5 px-3 text-right">
+                        <button
+                          onClick={() => handleEditWarehouse(w)}
+                          className="text-xs text-blue-600 hover:text-blue-800 font-medium mr-3"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteWarehouse(w.id)}
+                          className="text-xs text-red-500 hover:text-red-700 font-medium"
+                        >
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))
                 )}

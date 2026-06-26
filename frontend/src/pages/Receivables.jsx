@@ -12,6 +12,10 @@ export default function Receivables() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  // Edit state
+  const [editingCustomerId, setEditingCustomerId] = useState(null);
+  const [editingInvoiceId, setEditingInvoiceId] = useState(null);
+
   // Customer form
   const [customerForm, setCustomerForm] = useState({
     name: '', email: '', phone: '', address: '', customer_type: 'individual'
@@ -44,8 +48,8 @@ export default function Receivables() {
   }, []);
 
   useEffect(() => {
-    if (tab === 'invoices') fetchInvoices();
-    if (tab === 'payments') fetchPayments();
+    if (tab === 'invoices') { fetchInvoices(); fetchCustomers(); }
+    if (tab === 'payments') { fetchPayments(); fetchInvoices(); }
     if (tab === 'customers') fetchCustomers();
   }, [tab]);
 
@@ -53,55 +57,73 @@ export default function Receivables() {
     try {
       const res = await API.get('/receivables/summary');
       setSummary(res.data);
-    } catch (err) {
-      setError('Failed to load summary');
-    }
+    } catch { setError('Failed to load summary'); }
   };
 
   const fetchCustomers = async () => {
     try {
       const res = await API.get('/receivables/customers');
       setCustomers(res.data);
-    } catch (err) {
-      setError('Failed to load customers');
-    }
+    } catch { setError('Failed to load customers'); }
   };
 
   const fetchInvoices = async () => {
     try {
       const res = await API.get('/receivables/invoices');
       setInvoices(res.data);
-    } catch (err) {
-      setError('Failed to fetch invoices');
-    }
+    } catch { setError('Failed to fetch invoices'); }
   };
 
   const fetchPayments = async () => {
     try {
       const res = await API.get('/receivables/payments');
       setPayments(res.data);
-    } catch (err) {
-      setError('Failed to fetch payments');
-    }
+    } catch { setError('Failed to fetch payments'); }
   };
 
-  const handleCreateCustomer = async (e) => {
+  // ── CUSTOMER handlers ──
+  const handleSaveCustomer = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      await API.post('/receivables/customers', customerForm);
-      setSuccess('Customer created successfully');
+      if (editingCustomerId) {
+        await API.put(`/receivables/customers/${editingCustomerId}`, customerForm);
+        setSuccess('Customer updated successfully');
+        setEditingCustomerId(null);
+      } else {
+        await API.post('/receivables/customers', customerForm);
+        setSuccess('Customer created successfully');
+      }
       setCustomerForm({ name: '', email: '', phone: '', address: '', customer_type: 'individual' });
       fetchCustomers();
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create customer');
+      setError(err.response?.data?.error || 'Failed to save customer');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleEditCustomer = (c) => {
+    setEditingCustomerId(c.id);
+    setCustomerForm({ name: c.name, email: c.email || '', phone: c.phone || '', address: c.address || '', customer_type: c.customer_type });
+  };
+
+  const handleDeleteCustomer = async (id) => {
+    if (!window.confirm('Delete this customer?')) return;
+    setError('');
+    try {
+      await API.delete(`/receivables/customers/${id}`);
+      setSuccess('Customer deleted');
+      fetchCustomers();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete customer');
+    }
+  };
+
+  // ── INVOICE handlers ──
   const updateItem = (index, field, value) => {
     const updated = [...invoiceForm.items];
     updated[index][field] = field === 'description' ? value : Number(value);
@@ -109,71 +131,96 @@ export default function Receivables() {
   };
 
   const addItem = () => {
-    setInvoiceForm({
-      ...invoiceForm,
-      items: [...invoiceForm.items, { description: '', quantity: 1, unit_price: 0 }]
-    });
+    setInvoiceForm({ ...invoiceForm, items: [...invoiceForm.items, { description: '', quantity: 1, unit_price: 0 }] });
   };
 
   const removeItem = (index) => {
     if (invoiceForm.items.length <= 1) return;
-    setInvoiceForm({
-      ...invoiceForm,
-      items: invoiceForm.items.filter((_, i) => i !== index)
-    });
+    setInvoiceForm({ ...invoiceForm, items: invoiceForm.items.filter((_, i) => i !== index) });
   };
 
   const subtotal = invoiceForm.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
   const taxAmount = (subtotal * invoiceForm.tax_rate) / 100;
   const totalAmount = subtotal + taxAmount;
 
-  const handleCreateInvoice = async (e) => {
+  const blankInvoiceForm = () => ({
+    customer_id: '',
+    invoice_number: '',
+    date: new Date().toISOString().split('T')[0],
+    due_date: '',
+    tax_rate: 0,
+    notes: '',
+    items: [{ description: '', quantity: 1, unit_price: 0 }]
+  });
+
+  const handleSaveInvoice = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      await API.post('/receivables/invoices', {
-        ...invoiceForm,
-        tax_rate: Number(invoiceForm.tax_rate),
-      });
-      setSuccess('Invoice created successfully');
-      setInvoiceForm({
-        customer_id: '',
-        invoice_number: '',
-        date: new Date().toISOString().split('T')[0],
-        due_date: '',
-        tax_rate: 0,
-        notes: '',
-        items: [{ description: '', quantity: 1, unit_price: 0 }]
-      });
+      const payload = { ...invoiceForm, tax_rate: Number(invoiceForm.tax_rate) };
+      if (editingInvoiceId) {
+        await API.put(`/receivables/invoices/${editingInvoiceId}`, payload);
+        setSuccess('Invoice updated successfully');
+        setEditingInvoiceId(null);
+      } else {
+        await API.post('/receivables/invoices', payload);
+        setSuccess('Invoice created successfully');
+      }
+      setInvoiceForm(blankInvoiceForm());
       fetchInvoices();
       fetchSummary();
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create invoice');
+      setError(err.response?.data?.error || 'Failed to save invoice');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleEditInvoice = async (inv) => {
+    try {
+      const res = await API.get(`/receivables/invoices/${inv.id}`);
+      const data = res.data;
+      setEditingInvoiceId(inv.id);
+      setInvoiceForm({
+        customer_id: data.customer_id,
+        invoice_number: data.invoice_number,
+        date: data.date?.split('T')[0] || '',
+        due_date: data.due_date?.split('T')[0] || '',
+        tax_rate: data.tax_rate || 0,
+        notes: data.notes || '',
+        items: data.items?.length ? data.items.map(it => ({ description: it.description, quantity: it.quantity, unit_price: it.unit_price })) : [{ description: '', quantity: 1, unit_price: 0 }],
+      });
+      setTab('invoices');
+    } catch {
+      setError('Failed to load invoice details');
+    }
+  };
+
+  const handleDeleteInvoice = async (id) => {
+    if (!window.confirm('Delete this invoice? This cannot be undone.')) return;
+    setError('');
+    try {
+      await API.delete(`/receivables/invoices/${id}`);
+      setSuccess('Invoice deleted');
+      fetchInvoices();
+      fetchSummary();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete invoice');
+    }
+  };
+
+  // ── PAYMENT handlers ──
   const handleRecordPayment = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      await API.post('/receivables/payments', {
-        ...paymentForm,
-        amount: Number(paymentForm.amount),
-      });
+      await API.post('/receivables/payments', { ...paymentForm, amount: Number(paymentForm.amount) });
       setSuccess('Payment recorded successfully');
-      setPaymentForm({
-        invoice_id: '',
-        amount: '',
-        payment_date: new Date().toISOString().split('T')[0],
-        payment_method: 'cash',
-        reference: '',
-        notes: ''
-      });
+      setPaymentForm({ invoice_id: '', amount: '', payment_date: new Date().toISOString().split('T')[0], payment_method: 'cash', reference: '', notes: '' });
       fetchPayments();
       fetchInvoices();
       fetchSummary();
@@ -182,6 +229,21 @@ export default function Receivables() {
       setError(err.response?.data?.error || 'Failed to record payment');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeletePayment = async (id) => {
+    if (!window.confirm('Delete this payment? The invoice balance will be restored.')) return;
+    setError('');
+    try {
+      await API.delete(`/receivables/payments/${id}`);
+      setSuccess('Payment deleted');
+      fetchPayments();
+      fetchInvoices();
+      fetchSummary();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete payment');
     }
   };
 
@@ -207,7 +269,7 @@ export default function Receivables() {
         {tabs.map(t => (
           <button
             key={t.key}
-            onClick={() => { setTab(t.key); setError(''); setSuccess(''); }}
+            onClick={() => { setTab(t.key); setError(''); setSuccess(''); setEditingCustomerId(null); setEditingInvoiceId(null); }}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition ${
               tab === t.key
                 ? 'border-primary-700 text-primary-700'
@@ -252,7 +314,6 @@ export default function Receivables() {
             ))}
           </div>
 
-          {/* Recent Invoices */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
             <h2 className="text-base font-semibold text-gray-800 mb-4">Recent Invoices</h2>
             <table className="w-full text-sm">
@@ -295,8 +356,20 @@ export default function Receivables() {
       {tab === 'customers' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-            <h2 className="text-base font-semibold text-gray-800 mb-4">New Customer</h2>
-            <form onSubmit={handleCreateCustomer} className="space-y-4">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-base font-semibold text-gray-800">
+                {editingCustomerId ? 'Edit Customer' : 'New Customer'}
+              </h2>
+              {editingCustomerId && (
+                <button
+                  onClick={() => { setEditingCustomerId(null); setCustomerForm({ name: '', email: '', phone: '', address: '', customer_type: 'individual' }); }}
+                  className="text-xs text-gray-500 hover:text-gray-700 underline"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+            <form onSubmit={handleSaveCustomer} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
                 <input
@@ -354,7 +427,7 @@ export default function Receivables() {
                 className="w-full text-white font-medium py-2 rounded-lg text-sm transition disabled:opacity-50"
                 style={{ backgroundColor: '#a31b32' }}
               >
-                {loading ? 'Creating...' : 'Create Customer'}
+                {loading ? 'Saving...' : editingCustomerId ? 'Update Customer' : 'Create Customer'}
               </button>
             </form>
           </div>
@@ -370,14 +443,15 @@ export default function Receivables() {
                   <th className="text-left py-2 px-3 text-gray-500 font-medium">Email</th>
                   <th className="text-left py-2 px-3 text-gray-500 font-medium">Phone</th>
                   <th className="text-left py-2 px-3 text-gray-500 font-medium">Type</th>
+                  <th className="text-right py-2 px-3 text-gray-500 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {customers.length === 0 ? (
-                  <tr><td colSpan="4" className="text-center py-8 text-gray-400">No customers yet</td></tr>
+                  <tr><td colSpan="5" className="text-center py-8 text-gray-400">No customers yet</td></tr>
                 ) : (
                   customers.map(c => (
-                    <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50">
+                    <tr key={c.id} className={`border-b border-gray-50 hover:bg-gray-50 ${editingCustomerId === c.id ? 'bg-blue-50' : ''}`}>
                       <td className="py-2.5 px-3 font-medium text-gray-800">{c.name}</td>
                       <td className="py-2.5 px-3 text-gray-500">{c.email || '—'}</td>
                       <td className="py-2.5 px-3 text-gray-500">{c.phone || '—'}</td>
@@ -385,6 +459,10 @@ export default function Receivables() {
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 capitalize">
                           {c.customer_type}
                         </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        <button onClick={() => handleEditCustomer(c)} className="text-xs text-blue-600 hover:text-blue-800 font-medium mr-3">Edit</button>
+                        <button onClick={() => handleDeleteCustomer(c.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
                       </td>
                     </tr>
                   ))
@@ -399,8 +477,20 @@ export default function Receivables() {
       {tab === 'invoices' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-            <h2 className="text-base font-semibold text-gray-800 mb-4">New Invoice</h2>
-            <form onSubmit={handleCreateInvoice} className="space-y-4">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-base font-semibold text-gray-800">
+                {editingInvoiceId ? 'Edit Invoice' : 'New Invoice'}
+              </h2>
+              {editingInvoiceId && (
+                <button
+                  onClick={() => { setEditingInvoiceId(null); setInvoiceForm(blankInvoiceForm()); }}
+                  className="text-xs text-gray-500 hover:text-gray-700 underline"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+            <form onSubmit={handleSaveInvoice} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Invoice #</label>
@@ -499,11 +589,7 @@ export default function Receivables() {
                     </div>
                   ))}
                 </div>
-                <button
-                  type="button"
-                  onClick={addItem}
-                  className="mt-2 text-xs text-primary-700 hover:underline font-medium"
-                >
+                <button type="button" onClick={addItem} className="mt-2 text-xs text-primary-700 hover:underline font-medium">
                   + Add item
                 </button>
               </div>
@@ -522,16 +608,13 @@ export default function Receivables() {
                   />
                 </div>
                 <div className="flex justify-between text-sm text-gray-600">
-                  <span>Subtotal</span>
-                  <span>KES {subtotal.toLocaleString()}</span>
+                  <span>Subtotal</span><span>KES {subtotal.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-sm text-gray-600">
-                  <span>Tax ({invoiceForm.tax_rate}%)</span>
-                  <span>KES {taxAmount.toLocaleString()}</span>
+                  <span>Tax ({invoiceForm.tax_rate}%)</span><span>KES {taxAmount.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-base font-bold text-gray-800 border-t border-gray-100 pt-2">
-                  <span>Total</span>
-                  <span>KES {totalAmount.toLocaleString()}</span>
+                  <span>Total</span><span>KES {totalAmount.toLocaleString()}</span>
                 </div>
               </div>
 
@@ -552,7 +635,7 @@ export default function Receivables() {
                 className="w-full text-white font-medium py-2 rounded-lg text-sm transition disabled:opacity-50"
                 style={{ backgroundColor: '#a31b32' }}
               >
-                {loading ? 'Creating...' : 'Create Invoice'}
+                {loading ? 'Saving...' : editingInvoiceId ? 'Update Invoice' : 'Create Invoice'}
               </button>
             </form>
           </div>
@@ -567,7 +650,7 @@ export default function Receivables() {
                 <p className="text-center text-gray-400 text-sm py-8">No invoices yet</p>
               ) : (
                 invoices.map(inv => (
-                  <div key={inv.id} className="border border-gray-100 rounded-lg p-4">
+                  <div key={inv.id} className={`border rounded-lg p-4 transition ${editingInvoiceId === inv.id ? 'border-blue-300 bg-blue-50' : 'border-gray-100'}`}>
                     <div className="flex justify-between items-start mb-2">
                       <div>
                         <p className="text-sm font-semibold text-gray-800">{inv.customer_name}</p>
@@ -581,8 +664,12 @@ export default function Receivables() {
                       <span>Total: <strong>KES {Number(inv.total_amount).toLocaleString()}</strong></span>
                       <span>Balance: <strong className="text-red-600">KES {Number(inv.balance_due).toLocaleString()}</strong></span>
                     </div>
-                    <div className="text-xs text-gray-400 mt-1">
-                      Due: {new Date(inv.due_date).toLocaleDateString()}
+                    <div className="text-xs text-gray-400 mt-1">Due: {new Date(inv.due_date).toLocaleDateString()}</div>
+                    <div className="flex gap-3 mt-3 pt-2 border-t border-gray-100">
+                      {inv.status !== 'paid' && (
+                        <button onClick={() => handleEditInvoice(inv)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
+                      )}
+                      <button onClick={() => handleDeleteInvoice(inv.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
                     </div>
                   </div>
                 ))
@@ -696,6 +783,9 @@ export default function Receivables() {
                     <div className="flex justify-between mt-2">
                       <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">{p.payment_method}</span>
                       {p.reference && <span className="text-xs text-gray-400">{p.reference}</span>}
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-gray-100">
+                      <button onClick={() => handleDeletePayment(p.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
                     </div>
                   </div>
                 ))

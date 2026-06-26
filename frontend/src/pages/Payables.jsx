@@ -12,6 +12,10 @@ export default function Payables() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  // Edit state
+  const [editingSupplierId, setEditingSupplierId] = useState(null);
+  const [editingBillId, setEditingBillId] = useState(null);
+
   // Supplier form
   const [supplierForm, setSupplierForm] = useState({
     name: '', email: '', phone: '', address: '', supplier_type: 'company'
@@ -44,8 +48,8 @@ export default function Payables() {
   }, []);
 
   useEffect(() => {
-    if (tab === 'bills') fetchBills();
-    if (tab === 'payments') fetchPayments();
+    if (tab === 'bills') { fetchBills(); fetchSuppliers(); }
+    if (tab === 'payments') { fetchPayments(); fetchBills(); }
     if (tab === 'suppliers') fetchSuppliers();
   }, [tab]);
 
@@ -53,55 +57,73 @@ export default function Payables() {
     try {
       const res = await API.get('/payables/summary');
       setSummary(res.data);
-    } catch (err) {
-      setError('Failed to load summary');
-    }
+    } catch { setError('Failed to load summary'); }
   };
 
   const fetchSuppliers = async () => {
     try {
       const res = await API.get('/payables/suppliers');
       setSuppliers(res.data);
-    } catch (err) {
-      setError('Failed to load suppliers');
-    }
+    } catch { setError('Failed to load suppliers'); }
   };
 
   const fetchBills = async () => {
     try {
       const res = await API.get('/payables/bills');
       setBills(res.data);
-    } catch (err) {
-      setError('Failed to fetch bills');
-    }
+    } catch { setError('Failed to fetch bills'); }
   };
 
   const fetchPayments = async () => {
     try {
       const res = await API.get('/payables/payments');
       setPayments(res.data);
-    } catch (err) {
-      setError('Failed to fetch payments');
-    }
+    } catch { setError('Failed to fetch payments'); }
   };
 
-  const handleCreateSupplier = async (e) => {
+  // ── SUPPLIER handlers ──
+  const handleSaveSupplier = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      await API.post('/payables/suppliers', supplierForm);
-      setSuccess('Supplier created successfully');
+      if (editingSupplierId) {
+        await API.put(`/payables/suppliers/${editingSupplierId}`, supplierForm);
+        setSuccess('Supplier updated successfully');
+        setEditingSupplierId(null);
+      } else {
+        await API.post('/payables/suppliers', supplierForm);
+        setSuccess('Supplier created successfully');
+      }
       setSupplierForm({ name: '', email: '', phone: '', address: '', supplier_type: 'company' });
       fetchSuppliers();
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create supplier');
+      setError(err.response?.data?.error || 'Failed to save supplier');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleEditSupplier = (s) => {
+    setEditingSupplierId(s.id);
+    setSupplierForm({ name: s.name, email: s.email || '', phone: s.phone || '', address: s.address || '', supplier_type: s.supplier_type });
+  };
+
+  const handleDeleteSupplier = async (id) => {
+    if (!window.confirm('Delete this supplier?')) return;
+    setError('');
+    try {
+      await API.delete(`/payables/suppliers/${id}`);
+      setSuccess('Supplier deleted');
+      fetchSuppliers();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete supplier');
+    }
+  };
+
+  // ── BILL handlers ──
   const updateItem = (index, field, value) => {
     const updated = [...billForm.items];
     updated[index][field] = field === 'description' ? value : Number(value);
@@ -109,71 +131,96 @@ export default function Payables() {
   };
 
   const addItem = () => {
-    setBillForm({
-      ...billForm,
-      items: [...billForm.items, { description: '', quantity: 1, unit_price: 0 }]
-    });
+    setBillForm({ ...billForm, items: [...billForm.items, { description: '', quantity: 1, unit_price: 0 }] });
   };
 
   const removeItem = (index) => {
     if (billForm.items.length <= 1) return;
-    setBillForm({
-      ...billForm,
-      items: billForm.items.filter((_, i) => i !== index)
-    });
+    setBillForm({ ...billForm, items: billForm.items.filter((_, i) => i !== index) });
   };
 
   const subtotal = billForm.items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
   const taxAmount = (subtotal * billForm.tax_rate) / 100;
   const totalAmount = subtotal + taxAmount;
 
-  const handleCreateBill = async (e) => {
+  const blankBillForm = () => ({
+    supplier_id: '',
+    bill_number: '',
+    date: new Date().toISOString().split('T')[0],
+    due_date: '',
+    tax_rate: 0,
+    notes: '',
+    items: [{ description: '', quantity: 1, unit_price: 0 }]
+  });
+
+  const handleSaveBill = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      await API.post('/payables/bills', {
-        ...billForm,
-        tax_rate: Number(billForm.tax_rate),
-      });
-      setSuccess('Bill created successfully');
-      setBillForm({
-        supplier_id: '',
-        bill_number: '',
-        date: new Date().toISOString().split('T')[0],
-        due_date: '',
-        tax_rate: 0,
-        notes: '',
-        items: [{ description: '', quantity: 1, unit_price: 0 }]
-      });
+      const payload = { ...billForm, tax_rate: Number(billForm.tax_rate) };
+      if (editingBillId) {
+        await API.put(`/payables/bills/${editingBillId}`, payload);
+        setSuccess('Bill updated successfully');
+        setEditingBillId(null);
+      } else {
+        await API.post('/payables/bills', payload);
+        setSuccess('Bill created successfully');
+      }
+      setBillForm(blankBillForm());
       fetchBills();
       fetchSummary();
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create bill');
+      setError(err.response?.data?.error || 'Failed to save bill');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleEditBill = async (bill) => {
+    try {
+      const res = await API.get(`/payables/bills/${bill.id}`);
+      const data = res.data;
+      setEditingBillId(bill.id);
+      setBillForm({
+        supplier_id: data.supplier_id,
+        bill_number: data.bill_number,
+        date: data.date?.split('T')[0] || '',
+        due_date: data.due_date?.split('T')[0] || '',
+        tax_rate: data.tax_rate || 0,
+        notes: data.notes || '',
+        items: data.items?.length ? data.items.map(it => ({ description: it.description, quantity: it.quantity, unit_price: it.unit_price })) : [{ description: '', quantity: 1, unit_price: 0 }],
+      });
+      setTab('bills');
+    } catch {
+      setError('Failed to load bill details');
+    }
+  };
+
+  const handleDeleteBill = async (id) => {
+    if (!window.confirm('Delete this bill? This cannot be undone.')) return;
+    setError('');
+    try {
+      await API.delete(`/payables/bills/${id}`);
+      setSuccess('Bill deleted');
+      fetchBills();
+      fetchSummary();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete bill');
+    }
+  };
+
+  // ── PAYMENT handlers ──
   const handleRecordPayment = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      await API.post('/payables/payments', {
-        ...paymentForm,
-        amount: Number(paymentForm.amount),
-      });
+      await API.post('/payables/payments', { ...paymentForm, amount: Number(paymentForm.amount) });
       setSuccess('Payment recorded successfully');
-      setPaymentForm({
-        bill_id: '',
-        amount: '',
-        payment_date: new Date().toISOString().split('T')[0],
-        payment_method: 'cash',
-        reference: '',
-        notes: ''
-      });
+      setPaymentForm({ bill_id: '', amount: '', payment_date: new Date().toISOString().split('T')[0], payment_method: 'cash', reference: '', notes: '' });
       fetchPayments();
       fetchBills();
       fetchSummary();
@@ -182,6 +229,21 @@ export default function Payables() {
       setError(err.response?.data?.error || 'Failed to record payment');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeletePayment = async (id) => {
+    if (!window.confirm('Delete this payment? The bill balance will be restored.')) return;
+    setError('');
+    try {
+      await API.delete(`/payables/payments/${id}`);
+      setSuccess('Payment deleted');
+      fetchPayments();
+      fetchBills();
+      fetchSummary();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete payment');
     }
   };
 
@@ -207,7 +269,7 @@ export default function Payables() {
         {tabs.map(t => (
           <button
             key={t.key}
-            onClick={() => { setTab(t.key); setError(''); setSuccess(''); }}
+            onClick={() => { setTab(t.key); setError(''); setSuccess(''); setEditingSupplierId(null); setEditingBillId(null); }}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition ${
               tab === t.key
                 ? 'border-primary-700 text-primary-700'
@@ -252,7 +314,6 @@ export default function Payables() {
             ))}
           </div>
 
-          {/* Recent Bills */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
             <h2 className="text-base font-semibold text-gray-800 mb-4">Recent Bills</h2>
             <table className="w-full text-sm">
@@ -295,8 +356,20 @@ export default function Payables() {
       {tab === 'suppliers' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-            <h2 className="text-base font-semibold text-gray-800 mb-4">New Supplier</h2>
-            <form onSubmit={handleCreateSupplier} className="space-y-4">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-base font-semibold text-gray-800">
+                {editingSupplierId ? 'Edit Supplier' : 'New Supplier'}
+              </h2>
+              {editingSupplierId && (
+                <button
+                  onClick={() => { setEditingSupplierId(null); setSupplierForm({ name: '', email: '', phone: '', address: '', supplier_type: 'company' }); }}
+                  className="text-xs text-gray-500 hover:text-gray-700 underline"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+            <form onSubmit={handleSaveSupplier} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
                 <input
@@ -354,7 +427,7 @@ export default function Payables() {
                 className="w-full text-white font-medium py-2 rounded-lg text-sm transition disabled:opacity-50"
                 style={{ backgroundColor: '#a31b32' }}
               >
-                {loading ? 'Creating...' : 'Create Supplier'}
+                {loading ? 'Saving...' : editingSupplierId ? 'Update Supplier' : 'Create Supplier'}
               </button>
             </form>
           </div>
@@ -370,14 +443,15 @@ export default function Payables() {
                   <th className="text-left py-2 px-3 text-gray-500 font-medium">Email</th>
                   <th className="text-left py-2 px-3 text-gray-500 font-medium">Phone</th>
                   <th className="text-left py-2 px-3 text-gray-500 font-medium">Type</th>
+                  <th className="text-right py-2 px-3 text-gray-500 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {suppliers.length === 0 ? (
-                  <tr><td colSpan="4" className="text-center py-8 text-gray-400">No suppliers yet</td></tr>
+                  <tr><td colSpan="5" className="text-center py-8 text-gray-400">No suppliers yet</td></tr>
                 ) : (
                   suppliers.map(s => (
-                    <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50">
+                    <tr key={s.id} className={`border-b border-gray-50 hover:bg-gray-50 ${editingSupplierId === s.id ? 'bg-blue-50' : ''}`}>
                       <td className="py-2.5 px-3 font-medium text-gray-800">{s.name}</td>
                       <td className="py-2.5 px-3 text-gray-500">{s.email || '—'}</td>
                       <td className="py-2.5 px-3 text-gray-500">{s.phone || '—'}</td>
@@ -385,6 +459,10 @@ export default function Payables() {
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-700 capitalize">
                           {s.supplier_type}
                         </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        <button onClick={() => handleEditSupplier(s)} className="text-xs text-blue-600 hover:text-blue-800 font-medium mr-3">Edit</button>
+                        <button onClick={() => handleDeleteSupplier(s.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
                       </td>
                     </tr>
                   ))
@@ -399,20 +477,33 @@ export default function Payables() {
       {tab === 'bills' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-            <h2 className="text-base font-semibold text-gray-800 mb-4">New Bill</h2>
-
-            {/* Payball A/P info banner */}
-            <div className="flex items-start gap-3 bg-amber-50 border border-amber-100 rounded-lg px-4 py-3 mb-4">
-              <span className="text-amber-500 text-lg mt-0.5">📋</span>
-              <div>
-                <p className="text-xs font-semibold text-amber-800">Auto-journalized via Payball Account-1004</p>
-                <p className="text-xs text-amber-700 mt-0.5">
-                  Creating a bill posts: <strong>Dr 5001 Expenses</strong> / <strong>Cr 1004 Payball A/P</strong> — visible in your Trial Balance.
-                </p>
-              </div>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-base font-semibold text-gray-800">
+                {editingBillId ? 'Edit Bill' : 'New Bill'}
+              </h2>
+              {editingBillId && (
+                <button
+                  onClick={() => { setEditingBillId(null); setBillForm(blankBillForm()); }}
+                  className="text-xs text-gray-500 hover:text-gray-700 underline"
+                >
+                  Cancel
+                </button>
+              )}
             </div>
 
-            <form onSubmit={handleCreateBill} className="space-y-4">
+            {!editingBillId && (
+              <div className="flex items-start gap-3 bg-amber-50 border border-amber-100 rounded-lg px-4 py-3 mb-4">
+                <span className="text-amber-500 text-lg mt-0.5">📋</span>
+                <div>
+                  <p className="text-xs font-semibold text-amber-800">Auto-journalized via Payball Account-1004</p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    Creating a bill posts: <strong>Dr 5001 Expenses</strong> / <strong>Cr 1004 Payball A/P</strong> — visible in your Trial Balance.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveBill} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Bill #</label>
@@ -511,11 +602,7 @@ export default function Payables() {
                     </div>
                   ))}
                 </div>
-                <button
-                  type="button"
-                  onClick={addItem}
-                  className="mt-2 text-xs text-primary-700 hover:underline font-medium"
-                >
+                <button type="button" onClick={addItem} className="mt-2 text-xs text-primary-700 hover:underline font-medium">
                   + Add item
                 </button>
               </div>
@@ -534,16 +621,13 @@ export default function Payables() {
                   />
                 </div>
                 <div className="flex justify-between text-sm text-gray-600">
-                  <span>Subtotal</span>
-                  <span>KES {subtotal.toLocaleString()}</span>
+                  <span>Subtotal</span><span>KES {subtotal.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-sm text-gray-600">
-                  <span>Tax ({billForm.tax_rate}%)</span>
-                  <span>KES {taxAmount.toLocaleString()}</span>
+                  <span>Tax ({billForm.tax_rate}%)</span><span>KES {taxAmount.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-base font-bold text-gray-800 border-t border-gray-100 pt-2">
-                  <span>Total</span>
-                  <span>KES {totalAmount.toLocaleString()}</span>
+                  <span>Total</span><span>KES {totalAmount.toLocaleString()}</span>
                 </div>
               </div>
 
@@ -564,7 +648,7 @@ export default function Payables() {
                 className="w-full text-white font-medium py-2 rounded-lg text-sm transition disabled:opacity-50"
                 style={{ backgroundColor: '#a31b32' }}
               >
-                {loading ? 'Creating...' : 'Create Bill'}
+                {loading ? 'Saving...' : editingBillId ? 'Update Bill' : 'Create Bill'}
               </button>
             </form>
           </div>
@@ -579,7 +663,7 @@ export default function Payables() {
                 <p className="text-center text-gray-400 text-sm py-8">No bills yet</p>
               ) : (
                 bills.map(bill => (
-                  <div key={bill.id} className="border border-gray-100 rounded-lg p-4">
+                  <div key={bill.id} className={`border rounded-lg p-4 transition ${editingBillId === bill.id ? 'border-blue-300 bg-blue-50' : 'border-gray-100'}`}>
                     <div className="flex justify-between items-start mb-2">
                       <div>
                         <p className="text-sm font-semibold text-gray-800">{bill.supplier_name}</p>
@@ -593,8 +677,12 @@ export default function Payables() {
                       <span>Total: <strong>KES {Number(bill.total_amount).toLocaleString()}</strong></span>
                       <span>Balance: <strong className="text-red-600">KES {Number(bill.balance_due).toLocaleString()}</strong></span>
                     </div>
-                    <div className="text-xs text-gray-400 mt-1">
-                      Due: {new Date(bill.due_date).toLocaleDateString()}
+                    <div className="text-xs text-gray-400 mt-1">Due: {new Date(bill.due_date).toLocaleDateString()}</div>
+                    <div className="flex gap-3 mt-3 pt-2 border-t border-gray-100">
+                      {bill.status !== 'paid' && (
+                        <button onClick={() => handleEditBill(bill)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
+                      )}
+                      <button onClick={() => handleDeleteBill(bill.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
                     </div>
                   </div>
                 ))
@@ -610,14 +698,12 @@ export default function Payables() {
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
             <h2 className="text-base font-semibold text-gray-800 mb-4">Record Payment</h2>
 
-            {/* Payball A/P info banner */}
             <div className="flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 mb-4">
               <span className="text-blue-500 text-lg mt-0.5">🏦</span>
               <div>
                 <p className="text-xs font-semibold text-blue-800">Payball Account-1004 (Accounts Payable)</p>
                 <p className="text-xs text-blue-600 mt-0.5">
-                  Every payment you record will automatically post a journal entry —{' '}
-                  <strong>Dr 1004 Payball A/P</strong> / <strong>Cr 1002 Bank</strong> — and will be reflected in your Trial Balance.
+                  Every payment automatically posts: <strong>Dr 1004 Payball A/P</strong> / <strong>Cr 1002 Bank</strong> — reflected in your Trial Balance.
                 </p>
               </div>
             </div>
@@ -721,6 +807,9 @@ export default function Payables() {
                     <div className="flex justify-between mt-2">
                       <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">{p.payment_method}</span>
                       {p.reference && <span className="text-xs text-gray-400">{p.reference}</span>}
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-gray-100">
+                      <button onClick={() => handleDeletePayment(p.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
                     </div>
                   </div>
                 ))
