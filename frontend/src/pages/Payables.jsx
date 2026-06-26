@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import MainLayout from '../components/layout/MainLayout';
 import API from '../api/axios';
+import { isAdmin } from '../utils/auth';
 
 export default function Payables() {
+  const admin = isAdmin();
   const [tab, setTab] = useState('overview');
   const [suppliers, setSuppliers] = useState([]);
   const [bills, setBills] = useState([]);
@@ -480,8 +482,8 @@ export default function Payables() {
                         </span>
                       </td>
                       <td className="py-2.5 px-3 text-right">
-                        <button onClick={() => handleEditSupplier(s)} className="text-xs text-blue-600 hover:text-blue-800 font-medium mr-3">Edit</button>
-                        <button onClick={() => handleDeleteSupplier(s.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
+                        {admin && <button onClick={() => handleEditSupplier(s)} className="text-xs text-blue-600 hover:text-blue-800 font-medium mr-3">Edit</button>}
+                        {admin && <button onClick={() => handleDeleteSupplier(s.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>}
                       </td>
                     </tr>
                   ))
@@ -698,10 +700,7 @@ export default function Payables() {
                     </div>
                     <div className="text-xs text-gray-400 mt-1">Due: {new Date(bill.due_date).toLocaleDateString()}</div>
                     <div className="flex gap-3 mt-3 pt-2 border-t border-gray-100">
-                      {bill.status !== 'paid' && (
-                        <button onClick={() => handleEditBill(bill)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
-                      )}
-                      <button onClick={() => handleDeleteBill(bill.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
+                      <span className="text-xs text-gray-400 italic">Use Credit Notes to correct or reverse this bill</span>
                     </div>
                   </div>
                 ))
@@ -847,7 +846,7 @@ export default function Payables() {
                       {p.reference && <span className="text-xs text-gray-400">{p.reference}</span>}
                     </div>
                     <div className="mt-2 pt-2 border-t border-gray-100">
-                      <button onClick={() => handleDeletePayment(p.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
+                      <span className="text-xs text-gray-400 italic">Use Credit Notes to reverse this payment</span>
                     </div>
                   </div>
                 ))

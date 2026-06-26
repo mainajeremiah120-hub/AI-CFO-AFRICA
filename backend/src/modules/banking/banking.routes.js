@@ -5,25 +5,28 @@ import {
   createMpesaTransaction, getMpesaTransactions, deleteMpesaTransaction,
   getBankingSummary,
 } from './banking.controller.js';
-import { protect } from '../../middleware/auth.js';
+import { protect, requireAdmin } from '../../middleware/auth.js';
 
 const router = express.Router();
 router.use(protect);
 
+// Bank accounts — master data, admin only for mutations
 router.post('/accounts', createBankAccount);
 router.get('/accounts', getBankAccounts);
-router.put('/accounts/:id', updateBankAccount);
-router.delete('/accounts/:id', deleteBankAccount);
+router.put('/accounts/:id', requireAdmin, updateBankAccount);
+router.delete('/accounts/:id', requireAdmin, deleteBankAccount);
 
+// Transactions — record only; reversals via credit notes
 router.post('/transactions', createTransaction);
 router.get('/transactions', getTransactions);
-router.put('/transactions/:id', updateTransaction);
+router.put('/transactions/:id', requireAdmin, updateTransaction);
 router.put('/transactions/:id/reconcile', reconcileTransaction);
-router.delete('/transactions/:id', deleteTransaction);
+router.delete('/transactions/:id', requireAdmin, deleteTransaction);
 
+// M-Pesa — record only
 router.post('/mpesa', createMpesaTransaction);
 router.get('/mpesa', getMpesaTransactions);
-router.delete('/mpesa/:id', deleteMpesaTransaction);
+router.delete('/mpesa/:id', requireAdmin, deleteMpesaTransaction);
 
 router.get('/summary', getBankingSummary);
 

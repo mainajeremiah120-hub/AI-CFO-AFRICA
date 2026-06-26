@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import MainLayout from '../components/layout/MainLayout';
 import API from '../api/axios';
+import { isAdmin } from '../utils/auth';
 
 export default function Procurement() {
+  const admin = isAdmin();
   const [tab, setTab] = useState('overview');
   const [vendors, setVendors] = useState([]);
   const [requisitions, setRequisitions] = useState([]);
@@ -513,8 +515,8 @@ export default function Procurement() {
                         </span>
                       </td>
                       <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                        <button onClick={() => handleEditVendor(v)} className="text-xs text-blue-600 hover:text-blue-800 font-medium mr-3">Edit</button>
-                        <button onClick={() => handleDeleteVendor(v.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
+                        {admin && <button onClick={() => handleEditVendor(v)} className="text-xs text-blue-600 hover:text-blue-800 font-medium mr-3">Edit</button>}
+                        {admin && <button onClick={() => handleDeleteVendor(v.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>}
                       </td>
                     </tr>
                   ))
@@ -608,10 +610,10 @@ export default function Procurement() {
                           >Reject</button>
                         </>
                       )}
-                      <button
+                      {admin && <button
                         onClick={() => handleDeleteRequisition(r.id)}
                         className="px-3 text-xs py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 font-medium"
-                      >Delete</button>
+                      >Delete</button>}
                     </div>
                   </div>
                 ))
@@ -760,10 +762,10 @@ export default function Procurement() {
                     </div>
                     <div className="flex justify-between items-center mt-1">
                       <p className="text-sm font-bold text-gray-800">KES {Number(po.total_amount).toLocaleString()}</p>
-                      <button
+                      {admin && <button
                         onClick={() => handleDeletePO(po.id)}
                         className="text-xs text-red-500 hover:text-red-700 font-medium"
-                      >Delete</button>
+                      >Delete</button>}
                     </div>
                   </div>
                 ))
@@ -899,10 +901,7 @@ export default function Procurement() {
                     {gr.received_by && <p className="text-xs text-gray-500 mt-1">Received by: {gr.received_by}</p>}
                     {gr.notes && <p className="text-xs text-gray-400 mt-1">{gr.notes}</p>}
                     <div className="mt-2 pt-2 border-t border-gray-50">
-                      <button
-                        onClick={() => handleDeleteGR(gr.id)}
-                        className="text-xs text-red-500 hover:text-red-700 font-medium"
-                      >Delete</button>
+                      <span className="text-xs text-gray-400 italic">Use Supplier Return credit note to reverse</span>
                     </div>
                   </div>
                 ))

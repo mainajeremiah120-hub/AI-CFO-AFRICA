@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import MainLayout from '../components/layout/MainLayout';
 import API from '../api/axios';
+import { isAdmin } from '../utils/auth';
 
 export default function Receivables() {
+  const admin = isAdmin();
   const [tab, setTab] = useState('overview');
   const [customers, setCustomers] = useState([]);
   const [invoices, setInvoices] = useState([]);
@@ -480,8 +482,8 @@ export default function Receivables() {
                         </span>
                       </td>
                       <td className="py-2.5 px-3 text-right">
-                        <button onClick={() => handleEditCustomer(c)} className="text-xs text-blue-600 hover:text-blue-800 font-medium mr-3">Edit</button>
-                        <button onClick={() => handleDeleteCustomer(c.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
+                        {admin && <button onClick={() => handleEditCustomer(c)} className="text-xs text-blue-600 hover:text-blue-800 font-medium mr-3">Edit</button>}
+                        {admin && <button onClick={() => handleDeleteCustomer(c.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>}
                       </td>
                     </tr>
                   ))
@@ -685,10 +687,7 @@ export default function Receivables() {
                     </div>
                     <div className="text-xs text-gray-400 mt-1">Due: {new Date(inv.due_date).toLocaleDateString()}</div>
                     <div className="flex gap-3 mt-3 pt-2 border-t border-gray-100">
-                      {inv.status !== 'paid' && (
-                        <button onClick={() => handleEditInvoice(inv)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
-                      )}
-                      <button onClick={() => handleDeleteInvoice(inv.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
+                      <span className="text-xs text-gray-400 italic">Use Credit Notes to correct or reverse this invoice</span>
                     </div>
                   </div>
                 ))
@@ -823,7 +822,7 @@ export default function Receivables() {
                       {p.reference && <span className="text-xs text-gray-400">{p.reference}</span>}
                     </div>
                     <div className="mt-2 pt-2 border-t border-gray-100">
-                      <button onClick={() => handleDeletePayment(p.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
+                      <span className="text-xs text-gray-400 italic">Use Credit Notes to reverse this payment</span>
                     </div>
                   </div>
                 ))

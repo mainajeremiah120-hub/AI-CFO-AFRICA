@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import MainLayout from '../components/layout/MainLayout';
 import API from '../api/axios';
+import { isAdmin } from '../utils/auth';
 
 export default function Banking() {
+  const admin = isAdmin();
   const [tab, setTab] = useState('overview');
   const [bankAccounts, setBankAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -311,8 +313,8 @@ export default function Banking() {
                       <p className="text-xs text-gray-400 mt-1">Acc: {acc.account_number}</p>
                     )}
                     <div className="flex gap-3 mt-2 pt-2 border-t border-gray-50">
-                      <button onClick={() => handleEditAccount(acc)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
-                      <button onClick={() => handleDeleteAccount(acc.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
+                      {admin && <button onClick={() => handleEditAccount(acc)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>}
+                      {admin && <button onClick={() => handleDeleteAccount(acc.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>}
                     </div>
                   </div>
                 ))
@@ -425,8 +427,8 @@ export default function Banking() {
                       </div>
                     </div>
                     <div className="flex gap-3 pt-2 border-t border-gray-50">
-                      <button onClick={() => handleEditAccount(acc)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
-                      <button onClick={() => handleDeleteAccount(acc.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>
+                      {admin && <button onClick={() => handleEditAccount(acc)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>}
+                      {admin && <button onClick={() => handleDeleteAccount(acc.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>}
                     </div>
                   </div>
                 ))

@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import MainLayout from '../components/layout/MainLayout';
 import API from '../api/axios';
+import { isAdmin } from '../utils/auth';
 
 export default function Inventory() {
+  const admin = isAdmin();
   const [tab, setTab] = useState('overview');
   const [warehouses, setWarehouses] = useState([]);
   const [products, setProducts] = useState([]);
@@ -465,18 +467,14 @@ export default function Inventory() {
                       <span>Sell: <strong className="text-green-600">KES {Number(p.selling_price).toLocaleString()}</strong></span>
                     </div>
                     <div className="flex gap-3 mt-3 pt-2 border-t border-gray-100">
-                      <button
+                      {admin && <button
                         onClick={() => handleEditProduct(p)}
                         className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                      >
-                        Edit
-                      </button>
-                      <button
+                      >Edit</button>}
+                      {admin && <button
                         onClick={() => handleDeleteProduct(p.id)}
                         className="text-xs text-red-500 hover:text-red-700 font-medium"
-                      >
-                        Delete
-                      </button>
+                      >Delete</button>}
                     </div>
                   </div>
                 ))
@@ -609,12 +607,7 @@ export default function Inventory() {
                     </div>
                     {m.reference && <p className="text-xs text-gray-400 mt-1">Ref: {m.reference}</p>}
                     <div className="mt-2 pt-2 border-t border-gray-100">
-                      <button
-                        onClick={() => handleDeleteMovement(m.id)}
-                        className="text-xs text-red-500 hover:text-red-700 font-medium"
-                      >
-                        Delete
-                      </button>
+                      <span className="text-xs text-gray-400 italic">Use Stock Spoilage credit note to write off stock</span>
                     </div>
                   </div>
                 ))
@@ -693,18 +686,14 @@ export default function Inventory() {
                       <td className="py-2.5 px-3 font-medium text-gray-800">{w.name}</td>
                       <td className="py-2.5 px-3 text-gray-500">{w.location || '—'}</td>
                       <td className="py-2.5 px-3 text-right">
-                        <button
+                        {admin && <button
                           onClick={() => handleEditWarehouse(w)}
                           className="text-xs text-blue-600 hover:text-blue-800 font-medium mr-3"
-                        >
-                          Edit
-                        </button>
-                        <button
+                        >Edit</button>}
+                        {admin && <button
                           onClick={() => handleDeleteWarehouse(w.id)}
                           className="text-xs text-red-500 hover:text-red-700 font-medium"
-                        >
-                          Delete
-                        </button>
+                        >Delete</button>}
                       </td>
                     </tr>
                   ))
