@@ -18,29 +18,36 @@ export const createBankAccount = async (req, res) => {
     );
     const bankAccount = result.rows[0];
 
-    // Post opening balance journal entry if balance > 0
+    // Post opening balance journal entry if balance > 0 (Dr Bank/Cash, Cr Owner's Capital)
     if (Number(current_balance) > 0) {
-      const cashAccount = await client.query(
-        `SELECT id FROM accounts WHERE tenant_id = $1 AND code = $2`,
-        [tenantId, account_type === 'cash' ? '1001' : '1002']
-      );
+      const assetCode = account_type === 'cash' ? '1001' : '1002';
+      const [assetAcc, equityAcc] = await Promise.all([
+        client.query(`SELECT id FROM accounts WHERE tenant_id=$1 AND code=$2`, [tenantId, assetCode]),
+        client.query(`SELECT id FROM accounts WHERE tenant_id=$1 AND code='1000'`, [tenantId]),
+      ]);
 
-      if (cashAccount.rows[0]) {
-        const entryResult = await client.query(
+      if (assetAcc.rows[0]) {
+        const entry = (await client.query(
           `INSERT INTO journal_entries (tenant_id, date, description, reference, created_by)
            VALUES ($1, CURRENT_DATE, $2, $3, $4) RETURNING *`,
           [tenantId, `Opening balance — ${account_name}`, `OB-${account_name}`, req.user.userId]
-        );
-        const entry = entryResult.rows[0];
+        )).rows[0];
 
+        // Dr Bank/Cash
         await client.query(
-          `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1, $2, $3, 0)`,
-          [entry.id, cashAccount.rows[0].id, current_balance]
+          `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,$3,0)`,
+          [entry.id, assetAcc.rows[0].id, current_balance]
         );
-        await client.query(
-          `UPDATE accounts SET balance = balance + $1 WHERE id = $2`,
-          [current_balance, cashAccount.rows[0].id]
-        );
+        await client.query(`UPDATE accounts SET balance=balance+$1 WHERE id=$2`, [current_balance, assetAcc.rows[0].id]);
+
+        // Cr Owner's Capital
+        if (equityAcc.rows[0]) {
+          await client.query(
+            `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,0,$3)`,
+            [entry.id, equityAcc.rows[0].id, current_balance]
+          );
+          await client.query(`UPDATE accounts SET balance=balance+$1 WHERE id=$2`, [current_balance, equityAcc.rows[0].id]);
+        }
       }
     }
 
@@ -76,17 +83,29 @@ export const updateBankAccount = async (req, res) => {
         `SELECT id FROM accounts WHERE tenant_id=$1 AND code=$2`, [tenantId, accountCode]
       )).rows[0];
       if (glAccount) {
+        const equityAcc = (await client.query(`SELECT id FROM accounts WHERE tenant_id=$1 AND code='1000'`, [tenantId])).rows[0];
         const entry = (await client.query(
           `INSERT INTO journal_entries (tenant_id, date, description, reference, created_by)
            VALUES ($1, CURRENT_DATE, $2, $3, $4) RETURNING *`,
           [tenantId, `Balance adjustment — ${account_name || existing.account_name}`, `ADJ-${id}`, userId]
         )).rows[0];
         if (diff > 0) {
+          // Dr Bank, Cr Owner's Capital
           await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,$3,0)`, [entry.id, glAccount.id, diff]);
           await client.query(`UPDATE accounts SET balance=balance+$1 WHERE id=$2`, [diff, glAccount.id]);
+          if (equityAcc) {
+            await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,0,$3)`, [entry.id, equityAcc.id, diff]);
+            await client.query(`UPDATE accounts SET balance=balance+$1 WHERE id=$2`, [diff, equityAcc.id]);
+          }
         } else {
-          await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,0,$3)`, [entry.id, glAccount.id, Math.abs(diff)]);
-          await client.query(`UPDATE accounts SET balance=balance-$1 WHERE id=$2`, [Math.abs(diff), glAccount.id]);
+          const absDiff = Math.abs(diff);
+          // Dr Owner's Capital, Cr Bank
+          if (equityAcc) {
+            await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,$3,0)`, [entry.id, equityAcc.id, absDiff]);
+            await client.query(`UPDATE accounts SET balance=balance-$1 WHERE id=$2`, [absDiff, equityAcc.id]);
+          }
+          await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,0,$3)`, [entry.id, glAccount.id, absDiff]);
+          await client.query(`UPDATE accounts SET balance=balance-$1 WHERE id=$2`, [absDiff, glAccount.id]);
         }
       }
     }
@@ -183,29 +202,36 @@ export const createTransaction = async (req, res) => {
 
     if (accountResult.rows[0]) {
       const accountId = accountResult.rows[0].id;
-      const entryResult = await client.query(
+
+      // Counterpart: credit (money in) clears Receivables; debit (money out) clears Payables
+      const counterCode = transaction_type === 'credit' ? '1003' : '1004';
+      const counterResult = await client.query(
+        `SELECT id FROM accounts WHERE tenant_id=$1 AND code=$2`, [tenantId, counterCode]
+      );
+      const counterId = counterResult.rows[0]?.id;
+
+      const entry = (await client.query(
         `INSERT INTO journal_entries (tenant_id, date, description, reference, created_by)
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
         [tenantId, transaction_date || new Date(), description, reference || `TXN-${Date.now()}`, userId]
-      );
-      const entry = entryResult.rows[0];
+      )).rows[0];
 
       if (transaction_type === 'credit') {
-        await client.query(
-          `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1, $2, $3, 0)`,
-          [entry.id, accountId, amount]
-        );
-        await client.query(
-          `UPDATE accounts SET balance = balance + $1 WHERE id = $2`, [amount, accountId]
-        );
+        // Dr Bank (asset +), Cr Receivables (asset -)
+        await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,$3,0)`, [entry.id, accountId, amount]);
+        await client.query(`UPDATE accounts SET balance=balance+$1 WHERE id=$2`, [amount, accountId]);
+        if (counterId) {
+          await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,0,$3)`, [entry.id, counterId, amount]);
+          await client.query(`UPDATE accounts SET balance=balance-$1 WHERE id=$2`, [amount, counterId]);
+        }
       } else {
-        await client.query(
-          `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1, $2, 0, $3)`,
-          [entry.id, accountId, amount]
-        );
-        await client.query(
-          `UPDATE accounts SET balance = balance - $1 WHERE id = $2`, [amount, accountId]
-        );
+        // Dr Payables (liability -), Cr Bank (asset -)
+        if (counterId) {
+          await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,$3,0)`, [entry.id, counterId, amount]);
+          await client.query(`UPDATE accounts SET balance=balance-$1 WHERE id=$2`, [amount, counterId]);
+        }
+        await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,0,$3)`, [entry.id, accountId, amount]);
+        await client.query(`UPDATE accounts SET balance=balance-$1 WHERE id=$2`, [amount, accountId]);
       }
     }
 
@@ -284,35 +310,39 @@ export const createMpesaTransaction = async (req, res) => {
       [tenantId, transaction_id, transaction_type, phone_number, amount, direction, account_reference, description]
     );
 
-    // Auto post to accounting
-    const cashAccount = await client.query(
-      `SELECT id FROM accounts WHERE tenant_id = $1 AND code = '1001'`, [tenantId]
-    );
+    // Auto post to accounting — M-Pesa settles to bank (1002), not physical cash (1001)
+    // Credit (in): Dr Bank / Cr Receivables; Debit (out): Dr General Expenses / Cr Bank
+    const [bankAcc, counterAcc] = await Promise.all([
+      client.query(`SELECT id FROM accounts WHERE tenant_id=$1 AND code='1002'`, [tenantId]),
+      client.query(`SELECT id FROM accounts WHERE tenant_id=$1 AND code=$2`, [tenantId, direction === 'in' ? '1003' : '5001']),
+    ]);
 
-    if (cashAccount.rows[0]) {
-      const entryResult = await client.query(
+    if (bankAcc.rows[0]) {
+      const bankId    = bankAcc.rows[0].id;
+      const counterId = counterAcc.rows[0]?.id;
+
+      const entry = (await client.query(
         `INSERT INTO journal_entries (tenant_id, date, description, reference, created_by)
          VALUES ($1, CURRENT_DATE, $2, $3, $4) RETURNING *`,
         [tenantId, `M-Pesa ${direction === 'in' ? 'received' : 'sent'} — ${description}`, transaction_id, req.user.userId]
-      );
-      const entry = entryResult.rows[0];
+      )).rows[0];
 
       if (direction === 'in') {
-        await client.query(
-          `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1, $2, $3, 0)`,
-          [entry.id, cashAccount.rows[0].id, amount]
-        );
-        await client.query(
-          `UPDATE accounts SET balance = balance + $1 WHERE id = $2`, [amount, cashAccount.rows[0].id]
-        );
+        // Dr Bank (1002), Cr Receivables (1003)
+        await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,$3,0)`, [entry.id, bankId, amount]);
+        await client.query(`UPDATE accounts SET balance=balance+$1 WHERE id=$2`, [amount, bankId]);
+        if (counterId) {
+          await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,0,$3)`, [entry.id, counterId, amount]);
+          await client.query(`UPDATE accounts SET balance=balance-$1 WHERE id=$2`, [amount, counterId]);
+        }
       } else {
-        await client.query(
-          `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1, $2, 0, $3)`,
-          [entry.id, cashAccount.rows[0].id, amount]
-        );
-        await client.query(
-          `UPDATE accounts SET balance = balance - $1 WHERE id = $2`, [amount, cashAccount.rows[0].id]
-        );
+        // Dr General Expenses (5001), Cr Bank (1002)
+        if (counterId) {
+          await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,$3,0)`, [entry.id, counterId, amount]);
+          await client.query(`UPDATE accounts SET balance=balance+$1 WHERE id=$2`, [amount, counterId]);
+        }
+        await client.query(`INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,0,$3)`, [entry.id, bankId, amount]);
+        await client.query(`UPDATE accounts SET balance=balance-$1 WHERE id=$2`, [amount, bankId]);
       }
     }
 
