@@ -1,4 +1,5 @@
 import pool from '../../config/db.js';
+import { assertPositiveAmount, assertStringLength, AppError, handleError } from '../../middleware/validate.js';
 
 // ─── Startup migration ────────────────────────────────────────────────────────
 (async () => {
@@ -67,10 +68,44 @@ export const createCreditNote = async (req, res) => {
   const client = await pool.connect();
 
   try {
+    assertPositiveAmount(amount, 'Credit note amount');
+    assertStringLength(description, 'Description', 500);
+    assertStringLength(reference, 'Reference', 100);
+
     await client.query('BEGIN');
 
     const ref = reference || `CN-${Date.now()}`;
+    const cnAmt = Math.round(Number(amount) * 100) / 100;
     let drAcct, crAcct;
+
+    // ── Verify related document exists and belongs to this tenant ────────────
+    if (invoice_id) {
+      const inv = (await client.query(
+        `SELECT id, balance_due, total_amount FROM invoices WHERE id=$1 AND tenant_id=$2`,
+        [invoice_id, tenantId]
+      )).rows[0];
+      if (!inv) throw new AppError('Invoice not found or does not belong to your account', 404);
+      if (type === 'customer_return' && cnAmt > Number(inv.total_amount) + 0.01) {
+        throw new AppError(`Credit note amount exceeds original invoice total (${inv.total_amount})`);
+      }
+    }
+    if (bill_id) {
+      const bill = (await client.query(
+        `SELECT id, balance_due, total_amount FROM bills WHERE id=$1 AND tenant_id=$2`,
+        [bill_id, tenantId]
+      )).rows[0];
+      if (!bill) throw new AppError('Bill not found or does not belong to your account', 404);
+      if (type === 'supplier_return' && cnAmt > Number(bill.total_amount) + 0.01) {
+        throw new AppError(`Credit note amount exceeds original bill total (${bill.total_amount})`);
+      }
+    }
+    if (bank_account_id) {
+      const acc = (await client.query(
+        `SELECT id FROM bank_accounts WHERE id=$1 AND tenant_id=$2`,
+        [bank_account_id, tenantId]
+      )).rows[0];
+      if (!acc) throw new AppError('Bank account not found or does not belong to your account', 404);
+    }
 
     // ── Determine journal accounts by type ──────────────────────────────────
     if (type === 'customer_return') {
@@ -96,14 +131,14 @@ export const createCreditNote = async (req, res) => {
       drAcct = await getAcct(client, cashCode, tenantId);
       crAcct = await getAcct(client, '1004', tenantId);
     } else {
-      throw new Error(`Unknown credit note type: ${type}`);
+      throw new AppError(`Unknown credit note type: ${type}`);
     }
 
     // ── Post journal entry ───────────────────────────────────────────────────
     await postJournal(
       client, tenantId, date,
       `Credit Note ${ref} — ${type.replace(/_/g, ' ')}`,
-      userId, drAcct, crAcct, Number(amount)
+      userId, drAcct, crAcct, cnAmt
     );
 
     // ── Side effects per type ────────────────────────────────────────────────
@@ -114,7 +149,7 @@ export const createCreditNote = async (req, res) => {
                        WHEN balance_due - $1 < total_amount THEN 'partial'
                        ELSE status END
          WHERE id = $2 AND tenant_id = $3`,
-        [Number(amount), invoice_id, tenantId]
+        [cnAmt, invoice_id, tenantId]
       );
     }
 
@@ -125,7 +160,7 @@ export const createCreditNote = async (req, res) => {
                        WHEN balance_due - $1 < total_amount THEN 'partial'
                        ELSE status END
          WHERE id = $2 AND tenant_id = $3`,
-        [Number(amount), bill_id, tenantId]
+        [cnAmt, bill_id, tenantId]
       );
     }
 
@@ -133,7 +168,7 @@ export const createCreditNote = async (req, res) => {
       await client.query(
         `UPDATE inventory SET quantity_on_hand = GREATEST(0, quantity_on_hand - $1)
          WHERE product_id = $2 AND tenant_id = $3`,
-        [Number(quantity), product_id, tenantId]
+        [Math.round(Number(quantity) * 1000) / 1000, product_id, tenantId]
       );
     }
 
@@ -144,7 +179,7 @@ export const createCreditNote = async (req, res) => {
          status = CASE WHEN amount_paid - $1 <= 0 THEN 'unpaid'
                        ELSE 'partial' END
          WHERE id = $2 AND tenant_id = $3`,
-        [Number(amount), invoice_id, tenantId]
+        [cnAmt, invoice_id, tenantId]
       );
     }
 
@@ -155,7 +190,7 @@ export const createCreditNote = async (req, res) => {
          status = CASE WHEN amount_paid - $1 <= 0 THEN 'unpaid'
                        ELSE 'partial' END
          WHERE id = $2 AND tenant_id = $3`,
-        [Number(amount), bill_id, tenantId]
+        [cnAmt, bill_id, tenantId]
       );
     }
 
@@ -164,12 +199,12 @@ export const createCreditNote = async (req, res) => {
       const direction = type === 'payment_reversal_invoice' ? -1 : 1;
       await client.query(
         `UPDATE bank_accounts SET current_balance = current_balance + $1 WHERE id = $2 AND tenant_id = $3`,
-        [direction * Number(amount), bank_account_id, tenantId]
+        [direction * cnAmt, bank_account_id, tenantId]
       );
       await client.query(
         `INSERT INTO bank_transactions (tenant_id, bank_account_id, transaction_date, description, amount, transaction_type, reference)
          VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [tenantId, bank_account_id, date, `Credit Note ${ref}`, Number(amount),
+        [tenantId, bank_account_id, date, `Credit Note ${ref}`, cnAmt,
          type === 'payment_reversal_invoice' ? 'debit' : 'credit', ref]
       );
     }
@@ -181,7 +216,7 @@ export const createCreditNote = async (req, res) => {
           customer_id, supplier_id, invoice_id, bill_id,
           product_id, quantity, bank_account_id, payment_method, status, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'posted',$15) RETURNING *`,
-      [tenantId, ref, type, date, Number(amount), description,
+      [tenantId, ref, type, date, cnAmt, description,
        customer_id || null, supplier_id || null, invoice_id || null, bill_id || null,
        product_id || null, quantity || null, bank_account_id || null, payment_method || null, userId]
     );
@@ -190,7 +225,7 @@ export const createCreditNote = async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');
-    res.status(500).json({ error: err.message });
+    return handleError(res, err);
   } finally {
     client.release();
   }

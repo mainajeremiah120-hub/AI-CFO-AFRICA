@@ -1,4 +1,5 @@
 import pool from '../../config/db.js';
+import { assertPositiveQty, assertStringLength, AppError, handleError } from '../../middleware/validate.js';
 
 // Auto-add tax_exempt column to products if it doesn't exist yet
 const ensureTaxExemptColumn = async () => {
@@ -158,6 +159,10 @@ export const createStockMovement = async (req, res) => {
   const client = await pool.connect();
 
   try {
+    assertPositiveQty(quantity, 'Quantity');
+    assertStringLength(reason, 'Reason', 300);
+    assertStringLength(reference, 'Reference', 100);
+
     await client.query('BEGIN');
 
     const productResult = await client.query(
@@ -165,10 +170,7 @@ export const createStockMovement = async (req, res) => {
       [product_id, tenantId]
     );
     const product = productResult.rows[0];
-    if (!product) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Product not found' });
-    }
+    if (!product) throw new AppError('Product not found', 404);
 
     const existing = await client.query(
       `SELECT * FROM stock_levels WHERE product_id = $1 AND warehouse_id = $2`,

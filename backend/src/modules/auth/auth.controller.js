@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import pool from '../../config/db.js';
 import { sendWelcomeEmail } from '../../config/mailer.js';
+import { assertPasswordStrength, AppError, handleError } from '../../middleware/validate.js';
 
 const DEFAULT_ACCOUNTS = [
   { code: '1000', name: 'Owner injection Capital',  type: 'equity' },
@@ -33,6 +34,11 @@ export const register = async (req, res) => {
   const { companyName, industry, name, email, password } = req.body;
 
   try {
+    assertPasswordStrength(password);
+    if (!email || !name || !companyName) {
+      return res.status(400).json({ error: 'Company name, your name, and email are required' });
+    }
+
     const companyResult = await pool.query(
       `INSERT INTO companies (name, industry) VALUES ($1, $2) RETURNING *`,
       [companyName, industry]
@@ -60,7 +66,6 @@ export const register = async (req, res) => {
     sendWelcomeEmail({
       name: user.name,
       email: user.email,
-      password,
       companyName: company.name,
       role: user.role,
     }).catch(err => console.error('Welcome email failed:', err.message));
@@ -71,7 +76,7 @@ export const register = async (req, res) => {
       company,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return handleError(res, err);
   }
 };
 
@@ -82,6 +87,7 @@ export const login = async (req, res) => {
     const result = await pool.query(`SELECT * FROM users WHERE email = $1`, [email]);
     const user = result.rows[0];
 
+    if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
     if (!user) return res.status(401).json({ error: 'Invalid email or password' });
 
     const valid = await bcrypt.compare(password, user.password_hash);

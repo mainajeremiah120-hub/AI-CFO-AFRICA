@@ -1,4 +1,5 @@
 import pool from '../../config/db.js';
+import { assertPositiveAmount, assertStringLength, AppError, handleError } from '../../middleware/validate.js';
 
 // ─── SUPPLIERS ───────────────────────────────────────────
 
@@ -188,6 +189,10 @@ export const recordBillPayment = async (req, res) => {
   const client = await pool.connect();
 
   try {
+    assertPositiveAmount(amount, 'Payment amount');
+    assertStringLength(reference, 'Reference', 100);
+    assertStringLength(notes, 'Notes', 500);
+
     await client.query('BEGIN');
 
     const billResult = await client.query(
@@ -195,7 +200,12 @@ export const recordBillPayment = async (req, res) => {
       [bill_id, tenantId]
     );
     const bill = billResult.rows[0];
-    if (!bill) return res.status(404).json({ error: 'Bill not found' });
+    if (!bill) throw new AppError('Bill not found', 404);
+
+    const payAmt = Math.round(Number(amount) * 100) / 100;
+    if (payAmt > Number(bill.balance_due) + 0.01) {
+      throw new AppError(`Payment (${payAmt}) exceeds bill balance due (${bill.balance_due})`);
+    }
 
     const paymentResult = await client.query(
       `INSERT INTO bill_payments (tenant_id, bill_id, supplier_id, amount, payment_date, payment_method, reference, notes)
@@ -268,7 +278,7 @@ export const recordBillPayment = async (req, res) => {
     res.status(201).json(paymentResult.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');
-    res.status(500).json({ error: err.message });
+    return handleError(res, err);
   } finally {
     client.release();
   }

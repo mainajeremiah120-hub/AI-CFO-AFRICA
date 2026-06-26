@@ -1,4 +1,5 @@
 import pool from '../../config/db.js';
+import { assertPositiveAmount, assertStringLength, AppError, handleError } from '../../middleware/validate.js';
 
 // ─── CUSTOMERS ───────────────────────────────────────────
 export const createCustomer = async (req, res) => {
@@ -166,9 +167,18 @@ export const recordPayment = async (req, res) => {
   const { tenantId, userId } = req.user;
   const client = await pool.connect();
   try {
+    assertPositiveAmount(amount, 'Payment amount');
+    assertStringLength(reference, 'Reference', 100);
+    assertStringLength(notes, 'Notes', 500);
+
     await client.query('BEGIN');
     const invoice = (await client.query(`SELECT * FROM invoices WHERE id = $1 AND tenant_id = $2`, [invoice_id, tenantId])).rows[0];
-    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    if (!invoice) throw new AppError('Invoice not found', 404);
+
+    const payAmt = Math.round(Number(amount) * 100) / 100;
+    if (payAmt > Number(invoice.balance_due) + 0.01) {
+      throw new AppError(`Payment (${payAmt}) exceeds invoice balance due (${invoice.balance_due})`);
+    }
 
     await client.query(`INSERT INTO payments (tenant_id, invoice_id, customer_id, amount, payment_date, payment_method, reference, notes)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [tenantId, invoice_id, invoice.customer_id, amount, payment_date, payment_method, reference, notes]);
@@ -220,7 +230,7 @@ export const recordPayment = async (req, res) => {
     res.status(201).json({ message: "Payment recorded" });
   } catch (err) {
     await client.query('ROLLBACK');
-    res.status(500).json({ error: err.message });
+    return handleError(res, err);
   } finally {
     client.release();
   }

@@ -15,36 +15,35 @@ import {
   getStatutoryRates,
   updateStatutoryRates,
 } from './settings.controller.js';
-import { protect } from '../../middleware/auth.js';
+import { protect, requireAdmin } from '../../middleware/auth.js';
 
 const router = express.Router();
-
 router.use(protect);
 
-// Company
+// Company settings — admin only
 router.get('/', getSettings);
-router.put('/company', updateCompany);
-router.put('/update', updateSettings);
+router.put('/company',  requireAdmin, updateCompany);
+router.put('/update',   requireAdmin, updateSettings);
 
-// Profile
-router.get('/profile', getProfile);
-router.put('/profile', updateProfile);
+// Profile — any authenticated user
+router.get('/profile',  getProfile);
+router.put('/profile',  updateProfile);
 router.put('/password', changePassword);
 
-// Users
-router.get('/users', getUsers);
-router.post('/users', createUser);
-router.put('/users/:id', updateUserRole);
-router.delete('/users/:id', deleteUser);
+// User management — admin only
+router.get('/users',         requireAdmin, getUsers);
+router.post('/users',        requireAdmin, createUser);
+router.put('/users/:id',     requireAdmin, updateUserRole);
+router.delete('/users/:id',  requireAdmin, deleteUser);
 
-// Data Reset
-router.post('/reset', resetTransactionData);
+// Data reset — admin only (DANGEROUS)
+router.post('/reset', requireAdmin, resetTransactionData);
 
-// Seed default accounts for existing tenants
-router.post('/seed-accounts', seedDefaultAccounts);
+// Seed accounts — admin only
+router.post('/seed-accounts', requireAdmin, seedDefaultAccounts);
 
-// Statutory payroll rates
-router.get('/statutory-rates', getStatutoryRates);
-router.put('/statutory-rates', updateStatutoryRates);
+// Statutory payroll rates — admin only
+router.get('/statutory-rates',  getStatutoryRates);
+router.put('/statutory-rates',  requireAdmin, updateStatutoryRates);
 
 export default router;

@@ -5,24 +5,26 @@ import {
   getTrialBalance,
   createFiscalYear, getFiscalYears,
 } from './accounting.controller.js';
-import { protect } from '../../middleware/auth.js';
+import { protect, requireAdmin } from '../../middleware/auth.js';
 
 const router = express.Router();
 router.use(protect);
 
-router.post('/accounts', createAccount);
-router.get('/accounts', getAccounts);
-router.put('/accounts/:id', updateAccount);
-router.delete('/accounts/:id', deleteAccount);
+// Chart of Accounts — reads open, mutations admin-only
+router.get('/accounts',       getAccounts);
+router.post('/accounts',      requireAdmin, createAccount);
+router.put('/accounts/:id',   requireAdmin, updateAccount);
+router.delete('/accounts/:id',requireAdmin, deleteAccount);
 
-router.post('/journal-entries', createJournalEntry);
-router.get('/journal-entries', getJournalEntries);
-router.put('/journal-entries/:id', updateJournalEntry);
-router.delete('/journal-entries/:id', deleteJournalEntry);
+// Journal Entries — reads open, mutations admin-only (use module workflows instead)
+router.get('/journal-entries',      getJournalEntries);
+router.post('/journal-entries',     requireAdmin, createJournalEntry);
+router.put('/journal-entries/:id',  requireAdmin, updateJournalEntry);
+router.delete('/journal-entries/:id', requireAdmin, deleteJournalEntry);
 
 router.get('/trial-balance', getTrialBalance);
 
-router.post('/fiscal-years', createFiscalYear);
-router.get('/fiscal-years', getFiscalYears);
+router.post('/fiscal-years', requireAdmin, createFiscalYear);
+router.get('/fiscal-years',  getFiscalYears);
 
 export default router;

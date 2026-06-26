@@ -1,4 +1,5 @@
 import pool from '../../config/db.js';
+import { AppError, assertPositiveAmount, handleError } from '../../middleware/validate.js';
 
 // ─── ACCOUNTS ───────────────────────────────────────────
 
@@ -92,16 +93,29 @@ export const createJournalEntry = async (req, res) => {
     const entry = entryResult.rows[0];
 
     for (const line of lines) {
+      // Tenant isolation: verify account belongs to this tenant
+      const acctCheck = await client.query(
+        `SELECT id FROM accounts WHERE id = $1 AND tenant_id = $2 AND is_active = true`,
+        [line.account_id, tenantId]
+      );
+      if (acctCheck.rows.length === 0) {
+        throw new AppError(`Account ID ${line.account_id} not found in your chart of accounts`);
+      }
+
+      const debit  = Math.round(Number(line.debit  || 0) * 100) / 100;
+      const credit = Math.round(Number(line.credit || 0) * 100) / 100;
+      if (debit < 0 || credit < 0) throw new AppError('Debit and credit amounts cannot be negative');
+
       await client.query(
         `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit)
          VALUES ($1, $2, $3, $4)`,
-        [entry.id, line.account_id, line.debit || 0, line.credit || 0]
+        [entry.id, line.account_id, debit, credit]
       );
 
       // Update account balance
       await client.query(
         `UPDATE accounts SET balance = balance + $1 - $2 WHERE id = $3`,
-        [line.debit || 0, line.credit || 0, line.account_id]
+        [debit, credit, line.account_id]
       );
     }
 

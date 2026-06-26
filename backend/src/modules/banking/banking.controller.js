@@ -1,4 +1,5 @@
 import pool from '../../config/db.js';
+import { assertPositiveAmount, assertStringLength, AppError, handleError } from '../../middleware/validate.js';
 
 // ─── BANK ACCOUNTS ───────────────────────────────────────
 
@@ -173,24 +174,42 @@ export const createTransaction = async (req, res) => {
   const client = await pool.connect();
 
   try {
+    assertPositiveAmount(amount, 'Transaction amount');
+    assertStringLength(description, 'Description', 500);
+    assertStringLength(reference, 'Reference', 100);
+
     await client.query('BEGIN');
+
+    // Verify bank account belongs to this tenant
+    const accCheck = (await client.query(
+      `SELECT * FROM bank_accounts WHERE id=$1 AND tenant_id=$2 AND is_active=true`,
+      [bank_account_id, tenantId]
+    )).rows[0];
+    if (!accCheck) throw new AppError('Bank account not found', 404);
+
+    const txAmt = Math.round(Number(amount) * 100) / 100;
+
+    // Prevent debit from pushing balance below zero (overdraft guard)
+    if (transaction_type === 'debit' && Number(accCheck.current_balance) - txAmt < -0.01) {
+      throw new AppError(`Insufficient balance. Available: KES ${Number(accCheck.current_balance).toLocaleString()}`);
+    }
 
     const txResult = await client.query(
       `INSERT INTO bank_transactions (tenant_id, bank_account_id, transaction_date, description, amount, transaction_type, reference)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [tenantId, bank_account_id, transaction_date || new Date(), description, amount, transaction_type, reference]
+      [tenantId, bank_account_id, transaction_date || new Date(), description, txAmt, transaction_type, reference]
     );
 
     // Update bank account balance
-    const balanceChange = transaction_type === 'credit' ? Number(amount) : -Number(amount);
+    const balanceChange = transaction_type === 'credit' ? txAmt : -txAmt;
     await client.query(
-      `UPDATE bank_accounts SET current_balance = current_balance + $1 WHERE id = $2`,
-      [balanceChange, bank_account_id]
+      `UPDATE bank_accounts SET current_balance = current_balance + $1 WHERE id = $2 AND tenant_id = $3`,
+      [balanceChange, bank_account_id, tenantId]
     );
 
     // Post to accounting
     const bankAccountResult = await client.query(
-      `SELECT * FROM bank_accounts WHERE id = $1`, [bank_account_id]
+      `SELECT * FROM bank_accounts WHERE id = $1 AND tenant_id = $2`, [bank_account_id, tenantId]
     );
     const bankAcc = bankAccountResult.rows[0];
     const accountCode = bankAcc.account_type === 'cash' ? '1001' : '1002';
