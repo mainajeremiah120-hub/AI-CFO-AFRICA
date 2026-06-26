@@ -16,6 +16,7 @@ const Banking     = lazy(() => import('./pages/Banking'));
 const Analytics   = lazy(() => import('./pages/Analytics'));
 const Pos         = lazy(() => import('./pages/Pos'));
 const Settings    = lazy(() => import('./pages/Settings'));
+const CreditNotes = lazy(() => import('./pages/CreditNotes'));
 
 const PrivateRoute = ({ children }) => {
   const token = localStorage.getItem('token');
@@ -48,7 +49,8 @@ export default function App() {
           <Route path="/banking"     element={<PrivateRoute><Banking /></PrivateRoute>} />
           <Route path="/analytics"   element={<PrivateRoute><Analytics /></PrivateRoute>} />
           <Route path="/pos"         element={<PrivateRoute><Pos /></PrivateRoute>} />
-          <Route path="/settings"    element={<PrivateRoute><Settings /></PrivateRoute>} />
+          <Route path="/settings"      element={<PrivateRoute><Settings /></PrivateRoute>} />
+          <Route path="/credit-notes" element={<PrivateRoute><CreditNotes /></PrivateRoute>} />
           <Route path="*"            element={<Navigate to="/login" />} />
         </Routes>
       </Suspense>

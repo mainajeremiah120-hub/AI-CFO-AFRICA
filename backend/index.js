@@ -17,6 +17,7 @@ import bankingRoutes from './src/modules/banking/banking.routes.js';
 import analyticsRoutes from './src/modules/analytics/analytics.routes.js';
 import posRoutes from './src/modules/pos/pos.routes.js';
 import settingsRoutes from './src/modules/settings/settings.routes.js';
+import creditNotesRoutes from './src/modules/credit-notes/credit-notes.routes.js';
 
 const app = express();
 
@@ -43,6 +44,7 @@ app.use('/api/banking', bankingRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/pos', posRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/credit-notes', creditNotesRoutes);
 
 import { protect } from './src/middleware/auth.js';
 
