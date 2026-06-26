@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import MainLayout from '../components/layout/MainLayout';
 import API from '../api/axios';
 
@@ -12,6 +12,7 @@ export default function Accounting() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const seedingRef = useRef(false);
 
   // Account form
   const [accountForm, setAccountForm] = useState({
@@ -41,8 +42,8 @@ export default function Accounting() {
   const fetchAccounts = async () => {
     try {
       const res = await API.get('/accounting/accounts');
-      if (res.data.length === 0) {
-        // Auto-seed default chart of accounts for this tenant
+      if (res.data.length === 0 && !seedingRef.current) {
+        seedingRef.current = true;
         await API.post('/settings/seed-accounts');
         const seeded = await API.get('/accounting/accounts');
         setAccounts(seeded.data);
