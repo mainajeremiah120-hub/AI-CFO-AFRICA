@@ -5,7 +5,6 @@ import pool from '../../config/db.js';
 export const createEmployee = async (req, res) => {
   const { employee_number, full_name, email, phone, position, department, basic_salary, bank_account, hire_date } = req.body;
   const { tenantId } = req.user;
-
   try {
     const result = await pool.query(
       `INSERT INTO employees (tenant_id, employee_number, full_name, email, phone, position, department, basic_salary, bank_account, hire_date)
@@ -20,7 +19,6 @@ export const createEmployee = async (req, res) => {
 
 export const getEmployees = async (req, res) => {
   const { tenantId } = req.user;
-
   try {
     const result = await pool.query(
       `SELECT * FROM employees WHERE tenant_id = $1 AND is_active = true ORDER BY full_name ASC`,
@@ -53,27 +51,41 @@ export const deleteEmployee = async (req, res) => {
   const { id } = req.params;
   const { tenantId } = req.user;
   try {
-    await pool.query(
-      `UPDATE employees SET is_active=false WHERE id=$1 AND tenant_id=$2`,
-      [id, tenantId]
-    );
+    await pool.query(`UPDATE employees SET is_active=false WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
     res.json({ message: 'Employee deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// ─── PAYROLL CALCULATION HELPER ──────────────────────────
+// ─── PAYROLL CALCULATION ─────────────────────────────────
+// Kenya statutory deductions (FY 2024/25):
+//   PAYE          : 20% flat (simplified — use graduated bands for production)
+//   NSSF          : KES 2,160 (Tier I + II new rates, capped)
+//   NHIF/SHA      : bracket-based
+//   Housing Levy  : 1.5% of gross (Affordable Housing Act 2023)
 
 const calculateDeductions = (basic_salary) => {
   const salary = Number(basic_salary);
-  const paye = salary * 0.20;
-  const nssf = 2160;
-  const nhif = salary > 100000 ? 1700 : salary > 50000 ? 1200 : 850;
-  const total_deductions = paye + nssf + nhif;
+
+  const paye = Math.round(salary * 0.20);
+
+  const nssf = 2160; // Tier I (6% of 7,000) + Tier II (6% of 29,000) = 420 + 1,740
+
+  // NHIF / SHA brackets
+  let nhif;
+  if (salary > 100000)      nhif = 1700;
+  else if (salary > 50000)  nhif = 1200;
+  else if (salary > 30000)  nhif = 850;
+  else if (salary > 15000)  nhif = 500;
+  else                      nhif = 150;
+
+  const housing_levy = Math.round(salary * 0.015); // Affordable Housing Levy 1.5%
+
+  const total_deductions = paye + nssf + nhif + housing_levy;
   const net_pay = salary - total_deductions;
 
-  return { paye, nssf, nhif, total_deductions, net_pay };
+  return { paye, nssf, nhif, housing_levy, total_deductions, net_pay };
 };
 
 // ─── PAYROLL RUNS ────────────────────────────────────────
@@ -81,36 +93,29 @@ const calculateDeductions = (basic_salary) => {
 export const createPayrollRun = async (req, res) => {
   const { month, year } = req.body;
   const { tenantId, userId } = req.user;
-
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
 
-    // Check if run already exists for this month/year
     const existing = await client.query(
-      `SELECT * FROM payroll_runs WHERE tenant_id = $1 AND month = $2 AND year = $3`,
+      `SELECT id FROM payroll_runs WHERE tenant_id = $1 AND month = $2 AND year = $3`,
       [tenantId, month, year]
     );
     if (existing.rows.length > 0) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Payroll already exists for this month' });
+      return res.status(400).json({ error: 'Payroll already exists for this month/year' });
     }
 
-    const employeesResult = await client.query(
+    const employees = (await client.query(
       `SELECT * FROM employees WHERE tenant_id = $1 AND is_active = true`,
       [tenantId]
-    );
-    const employees = employeesResult.rows;
+    )).rows;
 
     if (employees.length === 0) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'No active employees found' });
     }
-
-    let total_gross = 0;
-    let total_deductions = 0;
-    let total_net = 0;
 
     const runResult = await client.query(
       `INSERT INTO payroll_runs (tenant_id, month, year, status, created_by)
@@ -119,27 +124,45 @@ export const createPayrollRun = async (req, res) => {
     );
     const run = runResult.rows[0];
 
-    for (const emp of employees) {
-      const { paye, nssf, nhif, total_deductions: empDeductions, net_pay } = calculateDeductions(emp.basic_salary);
+    let total_gross = 0, total_paye = 0, total_nssf = 0,
+        total_nhif = 0, total_housing = 0, total_deductions = 0, total_net = 0;
 
+    for (const emp of employees) {
+      const d = calculateDeductions(emp.basic_salary);
+
+      // other_deductions stores the housing levy
       await client.query(
-        `INSERT INTO payslips (tenant_id, payroll_run_id, employee_id, basic_salary, paye, nssf, nhif, other_deductions, gross_pay, total_deductions, net_pay)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $4, $8, $9)`,
-        [tenantId, run.id, emp.id, emp.basic_salary, paye, nssf, nhif, empDeductions, net_pay]
+        `INSERT INTO payslips
+           (tenant_id, payroll_run_id, employee_id, basic_salary,
+            paye, nssf, nhif, other_deductions,
+            gross_pay, total_deductions, net_pay)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$4,$9,$10)`,
+        [tenantId, run.id, emp.id, emp.basic_salary,
+         d.paye, d.nssf, d.nhif, d.housing_levy,
+         d.total_deductions, d.net_pay]
       );
 
-      total_gross += Number(emp.basic_salary);
-      total_deductions += empDeductions;
-      total_net += net_pay;
+      total_gross       += Number(emp.basic_salary);
+      total_paye        += d.paye;
+      total_nssf        += d.nssf;
+      total_nhif        += d.nhif;
+      total_housing     += d.housing_levy;
+      total_deductions  += d.total_deductions;
+      total_net         += d.net_pay;
     }
 
     await client.query(
-      `UPDATE payroll_runs SET total_gross = $1, total_deductions = $2, total_net = $3 WHERE id = $4`,
+      `UPDATE payroll_runs
+       SET total_gross=$1, total_deductions=$2, total_net=$3
+       WHERE id=$4`,
       [total_gross, total_deductions, total_net, run.id]
     );
 
     await client.query('COMMIT');
-    res.status(201).json({ ...run, total_gross, total_deductions, total_net });
+    res.status(201).json({
+      ...run, total_gross, total_paye, total_nssf,
+      total_nhif, total_housing, total_deductions, total_net,
+    });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
@@ -150,10 +173,19 @@ export const createPayrollRun = async (req, res) => {
 
 export const getPayrollRuns = async (req, res) => {
   const { tenantId } = req.user;
-
   try {
     const result = await pool.query(
-      `SELECT * FROM payroll_runs WHERE tenant_id = $1 ORDER BY year DESC, month DESC`,
+      `SELECT pr.*,
+              COALESCE(SUM(ps.paye),0)             AS total_paye,
+              COALESCE(SUM(ps.nssf),0)             AS total_nssf,
+              COALESCE(SUM(ps.nhif),0)             AS total_nhif,
+              COALESCE(SUM(ps.other_deductions),0) AS total_housing,
+              COUNT(ps.id)                         AS employee_count
+       FROM payroll_runs pr
+       LEFT JOIN payslips ps ON ps.payroll_run_id = pr.id
+       WHERE pr.tenant_id = $1
+       GROUP BY pr.id
+       ORDER BY pr.year DESC, pr.month DESC`,
       [tenantId]
     );
     res.json(result.rows);
@@ -165,13 +197,12 @@ export const getPayrollRuns = async (req, res) => {
 export const getPayslips = async (req, res) => {
   const { runId } = req.params;
   const { tenantId } = req.user;
-
   try {
     const result = await pool.query(
-      `SELECT p.*, e.full_name, e.employee_number, e.position
-       FROM payslips p
-       LEFT JOIN employees e ON p.employee_id = e.id
-       WHERE p.payroll_run_id = $1 AND p.tenant_id = $2
+      `SELECT ps.*, e.full_name, e.employee_number, e.position, e.department, e.bank_account
+       FROM payslips ps
+       LEFT JOIN employees e ON ps.employee_id = e.id
+       WHERE ps.payroll_run_id = $1 AND ps.tenant_id = $2
        ORDER BY e.full_name ASC`,
       [runId, tenantId]
     );
@@ -181,82 +212,68 @@ export const getPayslips = async (req, res) => {
   }
 };
 
-// ─── PROCESS PAYROLL (post journal entry) ───────────────
+// ─── PROCESS PAYROLL (journal entry) ────────────────────
 
 export const processPayroll = async (req, res) => {
   const { runId } = req.params;
   const { tenantId, userId } = req.user;
-
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
 
-    const runResult = await client.query(
-      `SELECT * FROM payroll_runs WHERE id = $1 AND tenant_id = $2`,
+    const run = (await client.query(
+      `SELECT * FROM payroll_runs WHERE id=$1 AND tenant_id=$2`,
       [runId, tenantId]
-    );
-    const run = runResult.rows[0];
-    if (!run) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Payroll run not found' });
-    }
-    if (run.status === 'processed') {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Payroll already processed' });
-    }
+    )).rows[0];
+    if (!run) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Run not found' }); }
+    if (run.status === 'processed') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Already processed' }); }
 
-    // Get account IDs
-    const salaryExpense = await client.query(`SELECT id FROM accounts WHERE tenant_id = $1 AND code = '5002'`, [tenantId]);
-    const bankAccount = await client.query(`SELECT id FROM accounts WHERE tenant_id = $1 AND code = '1002'`, [tenantId]);
-    const payableAccount = await client.query(`SELECT id FROM accounts WHERE tenant_id = $1 AND code = '1004'`, [tenantId]);
+    const salaryExpense = (await client.query(`SELECT id FROM accounts WHERE tenant_id=$1 AND code='5002'`, [tenantId])).rows[0];
+    const bankAccount   = (await client.query(`SELECT id FROM accounts WHERE tenant_id=$1 AND code='1002'`, [tenantId])).rows[0];
+    const payable       = (await client.query(`SELECT id FROM accounts WHERE tenant_id=$1 AND code='1004'`, [tenantId])).rows[0];
 
-    if (!salaryExpense.rows[0] || !bankAccount.rows[0]) {
+    if (!salaryExpense || !bankAccount) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Required accounts (5002 Salary Expense, 1002 Bank Account) not found' });
+      return res.status(400).json({ error: 'Required accounts (5002, 1002) not found in Chart of Accounts' });
     }
 
-    const salaryExpenseId = salaryExpense.rows[0].id;
-    const bankAccountId = bankAccount.rows[0].id;
-    const payableAccountId = payableAccount.rows[0]?.id;
-
-    const entryResult = await client.query(
+    const entry = (await client.query(
       `INSERT INTO journal_entries (tenant_id, date, description, reference, created_by)
        VALUES ($1, CURRENT_DATE, $2, $3, $4) RETURNING *`,
       [tenantId, `Payroll — ${run.month}/${run.year}`, `PAYROLL-${run.month}-${run.year}`, userId]
-    );
-    const entry = entryResult.rows[0];
+    )).rows[0];
 
-    // Debit Salary Expense (gross)
+    // Dr Salary Expense (full gross)
     await client.query(
-      `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1, $2, $3, 0)`,
-      [entry.id, salaryExpenseId, run.total_gross]
+      `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,$3,0)`,
+      [entry.id, salaryExpense.id, run.total_gross]
     );
-    await client.query(`UPDATE accounts SET balance = balance + $1 WHERE id = $2`, [run.total_gross, salaryExpenseId]);
+    await client.query(`UPDATE accounts SET balance=balance+$1 WHERE id=$2`, [run.total_gross, salaryExpense.id]);
 
-    // Credit Bank Account (net pay)
+    // Cr Bank Account (net disbursement)
     await client.query(
-      `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1, $2, 0, $3)`,
-      [entry.id, bankAccountId, run.total_net]
+      `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,0,$3)`,
+      [entry.id, bankAccount.id, run.total_net]
     );
-    await client.query(`UPDATE accounts SET balance = balance - $1 WHERE id = $2`, [run.total_net, bankAccountId]);
+    await client.query(`UPDATE accounts SET balance=balance-$1 WHERE id=$2`, [run.total_net, bankAccount.id]);
 
-    // Credit Payable Account (statutory deductions owed)
-    if (payableAccountId && run.total_deductions > 0) {
+    // Cr Payable (statutory deductions withheld)
+    if (payable && run.total_deductions > 0) {
       await client.query(
-        `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1, $2, 0, $3)`,
-        [entry.id, payableAccountId, run.total_deductions]
+        `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,0,$3)`,
+        [entry.id, payable.id, run.total_deductions]
       );
-      await client.query(`UPDATE accounts SET balance = balance - $1 WHERE id = $2`, [run.total_deductions, payableAccountId]);
+      await client.query(`UPDATE accounts SET balance=balance-$1 WHERE id=$2`, [run.total_deductions, payable.id]);
     }
 
     await client.query(
-      `UPDATE payroll_runs SET status = 'processed', processed_at = NOW() WHERE id = $1`,
+      `UPDATE payroll_runs SET status='processed', processed_at=NOW() WHERE id=$1`,
       [runId]
     );
 
     await client.query('COMMIT');
-    res.json({ message: 'Payroll processed successfully', run: { ...run, status: 'processed' } });
+    res.json({ message: 'Payroll processed successfully' });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
@@ -269,28 +286,62 @@ export const processPayroll = async (req, res) => {
 
 export const getPayrollSummary = async (req, res) => {
   const { tenantId } = req.user;
-
   try {
-    const employeeCount = await pool.query(
-      `SELECT COUNT(*) as total_employees, COALESCE(SUM(basic_salary), 0) as total_monthly_salary
-       FROM employees WHERE tenant_id = $1 AND is_active = true`,
-      [tenantId]
-    );
+    const [empRes, runsRes, deductRes] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*) as total_employees, COALESCE(SUM(basic_salary),0) as total_monthly_salary
+         FROM employees WHERE tenant_id=$1 AND is_active=true`,
+        [tenantId]
+      ),
+      pool.query(
+        `SELECT COUNT(*) as total_runs,
+                COUNT(*) FILTER (WHERE status='processed') as processed_runs
+         FROM payroll_runs WHERE tenant_id=$1`,
+        [tenantId]
+      ),
+      pool.query(
+        `SELECT
+           COALESCE(SUM(ps.paye),0)             AS ytd_paye,
+           COALESCE(SUM(ps.nssf),0)             AS ytd_nssf,
+           COALESCE(SUM(ps.nhif),0)             AS ytd_nhif,
+           COALESCE(SUM(ps.other_deductions),0) AS ytd_housing,
+           COALESCE(SUM(ps.net_pay),0)          AS ytd_net,
+           COALESCE(SUM(ps.gross_pay),0)        AS ytd_gross
+         FROM payslips ps
+         JOIN payroll_runs pr ON ps.payroll_run_id = pr.id
+         WHERE ps.tenant_id=$1 AND pr.status='processed'
+           AND pr.year=EXTRACT(YEAR FROM CURRENT_DATE)`,
+        [tenantId]
+      ),
+    ]);
 
-    const lastRun = await pool.query(
-      `SELECT * FROM payroll_runs WHERE tenant_id = $1 ORDER BY year DESC, month DESC LIMIT 1`,
+    const lastRun = (await pool.query(
+      `SELECT pr.*,
+              COALESCE(SUM(ps.paye),0)             AS total_paye,
+              COALESCE(SUM(ps.nssf),0)             AS total_nssf,
+              COALESCE(SUM(ps.nhif),0)             AS total_nhif,
+              COALESCE(SUM(ps.other_deductions),0) AS total_housing
+       FROM payroll_runs pr
+       LEFT JOIN payslips ps ON ps.payroll_run_id=pr.id
+       WHERE pr.tenant_id=$1
+       GROUP BY pr.id
+       ORDER BY pr.year DESC, pr.month DESC LIMIT 1`,
       [tenantId]
-    );
+    )).rows[0] || null;
 
     res.json({
-      ...employeeCount.rows[0],
-      last_run: lastRun.rows[0] || null,
+      ...empRes.rows[0],
+      ...runsRes.rows[0],
+      ...deductRes.rows[0],
+      last_run: lastRun,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
-// ─── PAYROLL RUN DELETE ──────────────────────────────────
+
+// ─── DELETE ──────────────────────────────────────────────
+
 export const deletePayrollRun = async (req, res) => {
   const { id } = req.params;
   const { tenantId } = req.user;
@@ -298,7 +349,7 @@ export const deletePayrollRun = async (req, res) => {
   try {
     await client.query('BEGIN');
     const run = (await client.query(`SELECT id FROM payroll_runs WHERE id=$1 AND tenant_id=$2`, [id, tenantId])).rows[0];
-    if (!run) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Payroll run not found' }); }
+    if (!run) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Run not found' }); }
     await client.query(`DELETE FROM payslips WHERE payroll_run_id=$1`, [id]);
     await client.query(`DELETE FROM payroll_runs WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
     await client.query('COMMIT');
