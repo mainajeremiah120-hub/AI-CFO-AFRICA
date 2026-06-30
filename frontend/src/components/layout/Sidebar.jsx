@@ -10,6 +10,7 @@ const navItems = [
   { label: 'Payroll', icon: '👥', path: '/payroll' },
   { label: 'Procurement', icon: '🛒', path: '/procurement' },
   { label: 'Banking', icon: '🏦', path: '/banking' },
+  { label: 'Cash', icon: '💵', path: '/cash' },
   { label: 'Credit Notes', icon: '📝', path: '/credit-notes' },
   { label: 'Analytics', icon: '📈', path: '/analytics' },
 ];

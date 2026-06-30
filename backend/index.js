@@ -26,6 +26,7 @@ import analyticsRoutes    from './src/modules/analytics/analytics.routes.js';
 import posRoutes          from './src/modules/pos/pos.routes.js';
 import settingsRoutes     from './src/modules/settings/settings.routes.js';
 import creditNotesRoutes  from './src/modules/credit-notes/credit-notes.routes.js';
+import cashRoutes         from './src/modules/cash/cash.routes.js';
 
 const app = express();
 
@@ -100,6 +101,7 @@ app.use('/api/analytics',    analyticsRoutes);
 app.use('/api/pos',          posRoutes);
 app.use('/api/settings',     settingsRoutes);
 app.use('/api/credit-notes', creditNotesRoutes);
+app.use('/api/cash',         cashRoutes);
 
 import { protect } from './src/middleware/auth.js';
 
