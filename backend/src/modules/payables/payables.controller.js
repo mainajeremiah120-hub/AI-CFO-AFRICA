@@ -260,16 +260,27 @@ export const recordBillPayment = async (req, res) => {
     await client.query(`UPDATE accounts SET balance = balance - $1 WHERE id = $2 AND tenant_id = $3`, [amount, cashAccountId, tenantId]);
     // ────────────────────────────────────────────────────────────────────────────────
 
-    // ─── DEDUCT FROM SPECIFIC BANK ACCOUNT (Banking module) ─────────────────
-    if (bank_account_id) {
+    // ─── DEDUCT FROM BANK ACCOUNT (Banking module) ───────────────────────────
+    // If bank_account_id is provided use it; otherwise auto-route to the first
+    // account of matching type so the transaction always appears in Banking.
+    let effectiveBankId = bank_account_id || null;
+    if (!effectiveBankId) {
+      const targetType = payment_method === 'cash' ? 'cash' : 'bank';
+      const primaryAcc = await client.query(
+        `SELECT id FROM bank_accounts WHERE tenant_id=$1 AND account_type=$2 AND is_active=true ORDER BY created_at ASC LIMIT 1`,
+        [tenantId, targetType]
+      );
+      effectiveBankId = primaryAcc.rows[0]?.id || null;
+    }
+    if (effectiveBankId) {
       await client.query(
         `UPDATE bank_accounts SET current_balance = current_balance - $1 WHERE id = $2 AND tenant_id = $3`,
-        [amount, bank_account_id, tenantId]
+        [amount, effectiveBankId, tenantId]
       );
       await client.query(
         `INSERT INTO bank_transactions (tenant_id, bank_account_id, transaction_date, description, amount, transaction_type, reference)
          VALUES ($1, $2, $3, $4, $5, 'debit', $6)`,
-        [tenantId, bank_account_id, payment_date, `Bill payment — ${bill.bill_number}`, amount, reference || `BILL-PAY-${bill_id}`]
+        [tenantId, effectiveBankId, payment_date, `Bill payment — ${bill.bill_number}`, amount, reference || `BILL-PAY-${bill_id}`]
       );
     }
     // ─────────────────────────────────────────────────────────────────────────

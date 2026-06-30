@@ -395,22 +395,49 @@ export const getBankingSummary = async (req, res) => {
   const { tenantId } = req.user;
 
   try {
-    const accounts = await pool.query(
+    const accountsRes = await pool.query(
       `SELECT
         COUNT(*) as total_accounts,
         SUM(current_balance) as total_balance,
         SUM(CASE WHEN account_type = 'mpesa' THEN current_balance ELSE 0 END) as mpesa_balance,
-        SUM(CASE WHEN account_type = 'bank' THEN current_balance ELSE 0 END) as bank_balance,
-        SUM(CASE WHEN account_type = 'cash' THEN current_balance ELSE 0 END) as cash_balance
+        SUM(CASE WHEN account_type = 'bank'  THEN current_balance ELSE 0 END) as bank_balance,
+        SUM(CASE WHEN account_type = 'cash'  THEN current_balance ELSE 0 END) as cash_balance
        FROM bank_accounts WHERE tenant_id = $1 AND is_active = true`,
       [tenantId]
     );
+
+    let summaryTotals = accountsRes.rows[0];
+
+    // When no bank_accounts are set up yet, fall back to Chart of Accounts journal_lines totals
+    if (Number(summaryTotals.total_accounts) === 0) {
+      const glRes = await pool.query(`
+        SELECT a.code,
+          COALESCE(SUM(jl.debit) - SUM(jl.credit), 0) AS balance
+        FROM accounts a
+        LEFT JOIN journal_lines jl ON a.id = jl.account_id
+        WHERE a.tenant_id = $1 AND a.code IN ('1001', '1002')
+        GROUP BY a.code
+      `, [tenantId]);
+
+      let cashBal = 0, bankBal = 0;
+      for (const row of glRes.rows) {
+        if (row.code === '1001') cashBal = Number(row.balance);
+        if (row.code === '1002') bankBal = Number(row.balance);
+      }
+      summaryTotals = {
+        total_accounts: '0',
+        total_balance: cashBal + bankBal,
+        mpesa_balance: 0,
+        bank_balance: bankBal,
+        cash_balance: cashBal,
+      };
+    }
 
     const transactions = await pool.query(
       `SELECT
         COUNT(*) as total_transactions,
         SUM(CASE WHEN transaction_type = 'credit' THEN amount ELSE 0 END) as total_credits,
-        SUM(CASE WHEN transaction_type = 'debit' THEN amount ELSE 0 END) as total_debits,
+        SUM(CASE WHEN transaction_type = 'debit'  THEN amount ELSE 0 END) as total_debits,
         SUM(CASE WHEN is_reconciled = false THEN 1 ELSE 0 END) as unreconciled_count
        FROM bank_transactions WHERE tenant_id = $1`,
       [tenantId]
@@ -419,19 +446,123 @@ export const getBankingSummary = async (req, res) => {
     const mpesa = await pool.query(
       `SELECT
         COUNT(*) as total_mpesa,
-        SUM(CASE WHEN direction = 'in' THEN amount ELSE 0 END) as total_mpesa_in,
+        SUM(CASE WHEN direction = 'in'  THEN amount ELSE 0 END) as total_mpesa_in,
         SUM(CASE WHEN direction = 'out' THEN amount ELSE 0 END) as total_mpesa_out
        FROM mpesa_transactions WHERE tenant_id = $1`,
       [tenantId]
     );
 
     res.json({
-      ...accounts.rows[0],
+      ...summaryTotals,
       ...transactions.rows[0],
       ...mpesa.rows[0],
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+};
+
+// ─── INTEGRATED LEDGER ───────────────────────────────────
+// Every journal entry that touched a bank/cash account (1001 or 1002)
+// from ANY module — the authoritative cross-module cash-flow view.
+export const getIntegratedLedger = async (req, res) => {
+  const { tenantId } = req.user;
+  const { from, to } = req.query;
+
+  try {
+    const params = [tenantId];
+    let dateFilter = '';
+    if (from) { params.push(from); dateFilter += ` AND je.date >= $${params.length}`; }
+    if (to)   { params.push(to);   dateFilter += ` AND je.date <= $${params.length}`; }
+
+    const result = await pool.query(`
+      SELECT
+        je.id,
+        je.date        AS transaction_date,
+        je.description,
+        je.reference,
+        je.created_at,
+        a.code         AS account_code,
+        a.name         AS account_name,
+        jl.debit,
+        jl.credit,
+        CASE
+          WHEN je.description ILIKE '%payment for bill%'    OR je.description ILIKE '%bill payment%'    THEN 'Payables'
+          WHEN je.description ILIKE '%payment for invoice%' OR je.description ILIKE '%invoice payment%' THEN 'Receivables'
+          WHEN je.description ILIKE '%opening balance%'                                                  THEN 'Opening Balance'
+          WHEN je.description ILIKE '%balance adjustment%'                                               THEN 'Adjustment'
+          WHEN je.description ILIKE '%stock received%'      OR je.description ILIKE '%stock issued%'    THEN 'Inventory'
+          WHEN je.description ILIKE '%m-pesa%'              OR je.description ILIKE '%mpesa%'           THEN 'M-Pesa'
+          WHEN je.description ILIKE '%credit note%'                                                      THEN 'Credit Note'
+          WHEN je.description ILIKE '%pos sale%'                                                         THEN 'POS'
+          WHEN je.description ILIKE '%payroll%'             OR je.description ILIKE '%salary%'          THEN 'Payroll'
+          ELSE 'General'
+        END AS source_module
+      FROM journal_entries je
+      JOIN journal_lines jl ON je.id = jl.journal_entry_id
+      JOIN accounts      a  ON jl.account_id = a.id
+      WHERE je.tenant_id = $1
+        AND a.code IN ('1001', '1002')
+        ${dateFilter}
+      ORDER BY je.date DESC, je.created_at DESC
+      LIMIT 1000
+    `, params);
+
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ─── SYNC BANKING FROM CHART OF ACCOUNTS ─────────────────
+// Auto-creates bank_accounts from journal_lines totals when none exist.
+export const syncBankingFromAccounts = async (req, res) => {
+  const { tenantId } = req.user;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query(
+      `SELECT COUNT(*) FROM bank_accounts WHERE tenant_id=$1 AND is_active=true`, [tenantId]
+    );
+    if (Number(existing.rows[0].count) > 0) {
+      await client.query('ROLLBACK');
+      return res.json({
+        synced: 0,
+        message: 'Bank accounts already exist. Add new ones manually in the Bank Accounts tab.',
+      });
+    }
+
+    const balances = await client.query(`
+      SELECT a.code,
+        COALESCE(SUM(jl.debit) - SUM(jl.credit), 0) AS balance
+      FROM accounts a
+      LEFT JOIN journal_lines jl ON a.id = jl.account_id
+      WHERE a.tenant_id = $1 AND a.code IN ('1001', '1002')
+      GROUP BY a.code
+    `, [tenantId]);
+
+    const created = [];
+    for (const row of balances.rows) {
+      const bal = Number(row.balance);
+      if (bal === 0) continue;
+      const accType = row.code === '1001' ? 'cash' : 'bank';
+      const accName = row.code === '1001' ? 'Cash at Hand' : 'Bank Account';
+      const acc = await client.query(`
+        INSERT INTO bank_accounts (tenant_id, account_name, account_type, current_balance)
+        VALUES ($1, $2, $3, $4) RETURNING *
+      `, [tenantId, accName, accType, bal]);
+      created.push(acc.rows[0]);
+    }
+
+    await client.query('COMMIT');
+    res.json({ synced: created.length, accounts: created });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 };
 // ─── TRANSACTION EDIT / DELETE ───────────────────────────

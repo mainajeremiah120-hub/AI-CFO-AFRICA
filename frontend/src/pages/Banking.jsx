@@ -3,17 +3,33 @@ import MainLayout from '../components/layout/MainLayout';
 import API from '../api/axios';
 import { isAdmin } from '../utils/auth';
 
+const MODULE_COLORS = {
+  'Payables':       'bg-red-50 text-red-700',
+  'Receivables':    'bg-green-50 text-green-700',
+  'Opening Balance':'bg-purple-50 text-purple-700',
+  'Adjustment':     'bg-yellow-50 text-yellow-700',
+  'Inventory':      'bg-orange-50 text-orange-700',
+  'M-Pesa':         'bg-emerald-50 text-emerald-700',
+  'Credit Note':    'bg-pink-50 text-pink-700',
+  'POS':            'bg-indigo-50 text-indigo-700',
+  'Payroll':        'bg-blue-50 text-blue-700',
+  'General':        'bg-gray-50 text-gray-600',
+};
+
 export default function Banking() {
   const admin = isAdmin();
   const [tab, setTab] = useState('overview');
   const [bankAccounts, setBankAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [mpesaTransactions, setMpesaTransactions] = useState([]);
+  const [integratedLedger, setIntegratedLedger] = useState([]);
   const [summary, setSummary] = useState(null);
   const [selectedAccount, setSelectedAccount] = useState('');
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [ledgerFilter, setLedgerFilter] = useState({ from: '', to: '' });
 
   // Bank Account form
   const [accountForm, setAccountForm] = useState({
@@ -52,6 +68,7 @@ export default function Banking() {
     if (tab === 'transactions') fetchTransactions();
     if (tab === 'mpesa') fetchMpesaTransactions();
     if (tab === 'accounts') fetchBankAccounts();
+    if (tab === 'all') fetchIntegratedLedger();
   }, [tab]);
 
   useEffect(() => {
@@ -62,7 +79,7 @@ export default function Banking() {
     try {
       const res = await API.get('/banking/summary');
       setSummary(res.data);
-    } catch (err) {
+    } catch {
       setError('Failed to load summary');
     }
   };
@@ -71,7 +88,7 @@ export default function Banking() {
     try {
       const res = await API.get('/banking/accounts');
       setBankAccounts(res.data);
-    } catch (err) {
+    } catch {
       setError('Failed to load bank accounts');
     }
   };
@@ -83,7 +100,7 @@ export default function Banking() {
         : '/banking/transactions';
       const res = await API.get(url);
       setTransactions(res.data);
-    } catch (err) {
+    } catch {
       setError('Failed to fetch transactions');
     }
   };
@@ -92,12 +109,46 @@ export default function Banking() {
     try {
       const res = await API.get('/banking/mpesa');
       setMpesaTransactions(res.data);
-    } catch (err) {
+    } catch {
       setError('Failed to fetch M-Pesa transactions');
     }
   };
 
-  const blankAccountForm = () => ({ account_name: '', account_number: '', bank_name: '', account_type: 'bank', current_balance: '' });
+  const fetchIntegratedLedger = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (ledgerFilter.from) params.append('from', ledgerFilter.from);
+      if (ledgerFilter.to)   params.append('to',   ledgerFilter.to);
+      const res = await API.get(`/banking/integrated-ledger?${params.toString()}`);
+      setIntegratedLedger(res.data);
+    } catch {
+      setError('Failed to fetch integrated ledger');
+    }
+  };
+
+  const handleSyncFromAccounts = async () => {
+    setSyncing(true);
+    setError('');
+    try {
+      const res = await API.post('/banking/sync');
+      if (res.data.synced > 0) {
+        setSuccess(`Synced ${res.data.synced} account(s) from Chart of Accounts.`);
+        fetchBankAccounts();
+        fetchSummary();
+      } else {
+        setSuccess(res.data.message || 'Nothing to sync.');
+      }
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const blankAccountForm = () => ({
+    account_name: '', account_number: '', bank_name: '', account_type: 'bank', current_balance: ''
+  });
 
   const handleCreateAccount = async (e) => {
     e.preventDefault();
@@ -224,27 +275,34 @@ export default function Banking() {
 
   const accountTypeColor = (type) => {
     if (type === 'mpesa') return 'bg-green-50 text-green-700';
-    if (type === 'cash') return 'bg-orange-50 text-orange-700';
+    if (type === 'cash')  return 'bg-orange-50 text-orange-700';
     return 'bg-blue-50 text-blue-700';
   };
 
   const tabs = [
-    { key: 'overview', label: 'Overview' },
-    { key: 'accounts', label: 'Bank Accounts' },
-    { key: 'transactions', label: 'Transactions' },
-    { key: 'mpesa', label: 'M-Pesa' },
+    { key: 'overview',     label: 'Overview' },
+    { key: 'all',          label: 'All Transactions' },
+    { key: 'accounts',     label: 'Bank Accounts' },
+    { key: 'transactions', label: 'Bank Transactions' },
+    { key: 'mpesa',        label: 'M-Pesa' },
   ];
+
+  // Running totals for integrated ledger
+  const ledgerTotals = integratedLedger.reduce(
+    (acc, row) => ({ in: acc.in + Number(row.debit), out: acc.out + Number(row.credit) }),
+    { in: 0, out: 0 }
+  );
 
   return (
     <MainLayout title="Banking">
 
       {/* Tabs */}
-      <div className="flex gap-2 mb-6 border-b border-gray-200">
+      <div className="flex gap-2 mb-6 border-b border-gray-200 overflow-x-auto">
         {tabs.map(t => (
           <button
             key={t.key}
             onClick={() => { setTab(t.key); setError(''); setSuccess(''); }}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition ${
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition whitespace-nowrap ${
               tab === t.key
                 ? 'border-primary-700 text-primary-700'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -255,7 +313,7 @@ export default function Banking() {
         ))}
       </div>
 
-      {error && <div className="bg-red-50 text-red-600 text-sm px-4 py-3 rounded-lg mb-4 border border-red-100">{error}</div>}
+      {error   && <div className="bg-red-50 text-red-600 text-sm px-4 py-3 rounded-lg mb-4 border border-red-100">{error}</div>}
       {success && <div className="bg-green-50 text-green-600 text-sm px-4 py-3 rounded-lg mb-4 border border-green-100">{success}</div>}
 
       {/* ── OVERVIEW ── */}
@@ -263,10 +321,10 @@ export default function Banking() {
         <div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             {[
-              { label: 'Total Balance', value: `KES ${Number(summary?.total_balance || 0).toLocaleString()}`, color: '#065f46' },
-              { label: 'Bank Balance', value: `KES ${Number(summary?.bank_balance || 0).toLocaleString()}`, color: '#1e40af' },
-              { label: 'M-Pesa Balance', value: `KES ${Number(summary?.mpesa_balance || 0).toLocaleString()}`, color: '#065f46' },
-              { label: 'Unreconciled', value: summary?.unreconciled_count || 0, color: '#a31b32' },
+              { label: 'Total Balance',  value: `KES ${Number(summary?.total_balance  || 0).toLocaleString()}`, color: '#065f46' },
+              { label: 'Bank Balance',   value: `KES ${Number(summary?.bank_balance   || 0).toLocaleString()}`, color: '#1e40af' },
+              { label: 'M-Pesa Balance', value: `KES ${Number(summary?.mpesa_balance  || 0).toLocaleString()}`, color: '#065f46' },
+              { label: 'Unreconciled',   value: summary?.unreconciled_count || 0,                               color: '#a31b32' },
             ].map((stat) => (
               <div key={stat.label} className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm">
                 <p className="text-sm text-gray-500 mb-2">{stat.label}</p>
@@ -277,8 +335,8 @@ export default function Banking() {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
             {[
-              { label: 'Total M-Pesa In', value: `KES ${Number(summary?.total_mpesa_in || 0).toLocaleString()}` },
-              { label: 'Total M-Pesa Out', value: `KES ${Number(summary?.total_mpesa_out || 0).toLocaleString()}` },
+              { label: 'Total M-Pesa In',    value: `KES ${Number(summary?.total_mpesa_in  || 0).toLocaleString()}` },
+              { label: 'Total M-Pesa Out',   value: `KES ${Number(summary?.total_mpesa_out || 0).toLocaleString()}` },
               { label: 'Total Transactions', value: summary?.total_transactions || 0 },
             ].map((stat) => (
               <div key={stat.label} className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm text-center">
@@ -290,12 +348,31 @@ export default function Banking() {
 
           {/* Bank Accounts Overview */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-            <h2 className="text-base font-semibold text-gray-800 mb-4">Your Accounts</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {bankAccounts.length === 0 ? (
-                <p className="text-gray-400 text-sm col-span-3 text-center py-8">No bank accounts yet</p>
-              ) : (
-                bankAccounts.map(acc => (
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-base font-semibold text-gray-800">Your Accounts</h2>
+              {bankAccounts.length === 0 && (
+                <button
+                  onClick={handleSyncFromAccounts}
+                  disabled={syncing}
+                  className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition"
+                  style={{ backgroundColor: '#a31b32' }}
+                >
+                  {syncing ? 'Syncing…' : 'Sync from Chart of Accounts'}
+                </button>
+              )}
+            </div>
+
+            {bankAccounts.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500 text-sm mb-2">No bank accounts set up yet.</p>
+                <p className="text-gray-400 text-xs">
+                  Click "Sync from Chart of Accounts" to auto-create accounts from your existing balances,
+                  or go to the Bank Accounts tab to add them manually.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {bankAccounts.map(acc => (
                   <div key={acc.id} className="border border-gray-100 rounded-xl p-4">
                     <div className="flex justify-between items-start mb-3">
                       <div>
@@ -317,8 +394,130 @@ export default function Banking() {
                       {admin && <button onClick={() => handleDeleteAccount(acc.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>}
                     </div>
                   </div>
-                ))
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── ALL TRANSACTIONS (Integrated Ledger) ── */}
+      {tab === 'all' && (
+        <div className="space-y-4">
+          {/* Filters + summary */}
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">From</label>
+                <input
+                  type="date"
+                  value={ledgerFilter.from}
+                  onChange={e => setLedgerFilter(f => ({ ...f, from: e.target.value }))}
+                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">To</label>
+                <input
+                  type="date"
+                  value={ledgerFilter.to}
+                  onChange={e => setLedgerFilter(f => ({ ...f, to: e.target.value }))}
+                  className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+              <button
+                onClick={fetchIntegratedLedger}
+                className="px-4 py-1.5 text-sm text-white rounded-lg transition"
+                style={{ backgroundColor: '#a31b32' }}
+              >
+                Filter
+              </button>
+              {(ledgerFilter.from || ledgerFilter.to) && (
+                <button
+                  onClick={() => { setLedgerFilter({ from: '', to: '' }); fetchIntegratedLedger(); }}
+                  className="px-4 py-1.5 text-sm border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50"
+                >
+                  Clear
+                </button>
               )}
+              <div className="ml-auto flex gap-6 text-sm">
+                <span className="text-green-700 font-semibold">
+                  Total In: KES {ledgerTotals.in.toLocaleString()}
+                </span>
+                <span className="text-red-600 font-semibold">
+                  Total Out: KES {ledgerTotals.out.toLocaleString()}
+                </span>
+                <span className="text-gray-700 font-semibold">
+                  Net: KES {(ledgerTotals.in - ledgerTotals.out).toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
+            <div className="p-4 border-b border-gray-100 flex justify-between items-center">
+              <h2 className="text-base font-semibold text-gray-800">
+                All Cash &amp; Bank Movements
+                <span className="ml-2 text-gray-400 font-normal text-sm">({integratedLedger.length} entries)</span>
+              </h2>
+              <p className="text-xs text-gray-400">From all modules — Payables, Receivables, M-Pesa, Banking</p>
+            </div>
+
+            {integratedLedger.length === 0 ? (
+              <div className="text-center py-12">
+                <p className="text-gray-400 text-sm">No cash/bank movements yet.</p>
+                <p className="text-xs text-gray-300 mt-1">Record invoices, bills, or banking transactions to see them here.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3">Description</th>
+                      <th className="px-4 py-3">Module</th>
+                      <th className="px-4 py-3">Account</th>
+                      <th className="px-4 py-3 text-right text-green-700">Money In</th>
+                      <th className="px-4 py-3 text-right text-red-600">Money Out</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {integratedLedger.map((row, i) => (
+                      <tr key={`${row.id}-${i}`} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                          {new Date(row.transaction_date).toLocaleDateString('en-KE')}
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-gray-800">{row.description}</p>
+                          {row.reference && (
+                            <p className="text-xs text-gray-400">{row.reference}</p>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${MODULE_COLORS[row.source_module] || MODULE_COLORS.General}`}>
+                            {row.source_module}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">{row.account_name}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-green-600">
+                          {Number(row.debit) > 0
+                            ? `KES ${Number(row.debit).toLocaleString()}`
+                            : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-right font-semibold text-red-600">
+                          {Number(row.credit) > 0
+                            ? `KES ${Number(row.credit).toLocaleString()}`
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-400 rounded-b-xl">
+              Sourced directly from journal entries — includes all modules. Debit = money flowing into bank/cash; Credit = money flowing out.
             </div>
           </div>
         </div>
@@ -401,6 +600,22 @@ export default function Banking() {
                 )}
               </div>
             </form>
+
+            {/* Sync helper */}
+            {bankAccounts.length === 0 && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <p className="text-xs text-gray-500 mb-2">
+                  Already have balances in your Chart of Accounts? Click below to auto-create bank accounts from them.
+                </p>
+                <button
+                  onClick={handleSyncFromAccounts}
+                  disabled={syncing}
+                  className="w-full px-4 py-2 text-sm border-2 border-dashed border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {syncing ? 'Syncing…' : 'Sync from Chart of Accounts'}
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="lg:col-span-2 bg-white rounded-xl border border-gray-100 shadow-sm p-6">
@@ -438,7 +653,7 @@ export default function Banking() {
         </div>
       )}
 
-      {/* ── TRANSACTIONS ── */}
+      {/* ── BANK TRANSACTIONS ── */}
       {tab === 'transactions' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">

@@ -3,7 +3,7 @@ import {
   createBankAccount, getBankAccounts, updateBankAccount, deleteBankAccount,
   createTransaction, getTransactions, reconcileTransaction, updateTransaction, deleteTransaction,
   createMpesaTransaction, getMpesaTransactions, deleteMpesaTransaction,
-  getBankingSummary,
+  getBankingSummary, getIntegratedLedger, syncBankingFromAccounts,
 } from './banking.controller.js';
 import { protect, requireAdmin } from '../../middleware/auth.js';
 
@@ -29,5 +29,7 @@ router.get('/mpesa', getMpesaTransactions);
 router.delete('/mpesa/:id', requireAdmin, deleteMpesaTransaction);
 
 router.get('/summary', getBankingSummary);
+router.get('/integrated-ledger', getIntegratedLedger);
+router.post('/sync', syncBankingFromAccounts);
 
 export default router;
