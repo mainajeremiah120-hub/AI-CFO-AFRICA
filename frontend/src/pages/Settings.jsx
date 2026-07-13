@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import MainLayout from '../components/layout/MainLayout';
 import API from '../api/axios';
+import { isAdmin } from '../utils/auth';
 
 const ROLES = ['admin', 'cfo', 'accountant', 'auditor', 'hr_manager', 'store_manager'];
 const INDUSTRIES = ['Healthcare', 'Retail', 'Manufacturing', 'Logistics', 'Construction', 'NGO / Non-Profit', 'Education', 'Hospitality', 'Other'];
@@ -19,6 +20,7 @@ const TrashIcon = () => (
 );
 
 export default function Settings() {
+  const admin = isAdmin();
   const [tab, setTab] = useState('company');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -86,6 +88,10 @@ export default function Settings() {
     current_password: '', new_password: '', confirm_password: ''
   });
 
+  // Audit log
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditEntity, setAuditEntity] = useState('');
+
   // New user form
   const [userForm, setUserForm] = useState({
     name: '', email: '', password: '', role: 'accountant'
@@ -100,7 +106,29 @@ export default function Settings() {
 
   useEffect(() => {
     if (tab === 'master') fetchMasterData();
+    if (tab === 'audit') fetchAuditLogs();
   }, [tab, masterTab]);
+
+  const fetchAuditLogs = async (entity = auditEntity) => {
+    try {
+      const params = entity ? `?entity=${encodeURIComponent(entity)}` : '';
+      const res = await API.get(`/audit${params}`);
+      setAuditLogs(res.data);
+    } catch {
+      showMessage('Failed to load audit logs', true);
+    }
+  };
+
+  const handleClearOldLogs = async () => {
+    if (!window.confirm('Delete all audit log entries older than 90 days?')) return;
+    try {
+      const res = await API.delete('/audit/old');
+      showMessage(res.data.message || 'Old logs cleared');
+      fetchAuditLogs();
+    } catch (err) {
+      showMessage(err.response?.data?.error || 'Failed to clear logs', true);
+    }
+  };
 
   const fetchStatutoryRates = async () => {
     try {
@@ -396,15 +424,16 @@ export default function Settings() {
   );
 
   const tabs = [
-    { key: 'company', label: '🏢 Company' },
-    { key: 'financial', label: '💰 Financial' },
-    { key: 'statutory', label: '📋 Statutory Rates' },
-    { key: 'pos', label: '🛒 POS & Receipt' },
-    { key: 'notifications', label: '🔔 Notifications' },
-    { key: 'profile', label: '👤 My Profile' },
-    { key: 'users', label: '👥 Users' },
-    { key: 'master', label: '🗂️ Master Data' },
-    { key: 'danger', label: '⚠️ Data Reset' },
+    { key: 'company',       label: 'Company' },
+    { key: 'financial',     label: 'Financial' },
+    { key: 'statutory',     label: 'Statutory Rates' },
+    { key: 'pos',           label: 'POS & Receipt' },
+    { key: 'notifications', label: 'Notifications' },
+    { key: 'profile',       label: 'My Profile' },
+    { key: 'users',         label: 'Users' },
+    { key: 'master',        label: 'Master Data' },
+    { key: 'audit',         label: 'Audit Log' },
+    { key: 'danger',        label: 'Data Reset' },
   ];
 
   return (
@@ -1273,12 +1302,84 @@ export default function Settings() {
         </div>
       )}
 
+      {/* ── AUDIT LOG ── */}
+      {tab === 'audit' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+            <div className="flex flex-wrap items-center gap-3 mb-4">
+              <h2 className="text-base font-semibold text-gray-800 flex-1">Audit Log</h2>
+              <select
+                value={auditEntity}
+                onChange={e => { setAuditEntity(e.target.value); fetchAuditLogs(e.target.value); }}
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
+                <option value="">All Entities</option>
+                <option value="invoice">Invoice</option>
+                <option value="payment">Payment</option>
+                <option value="bill">Bill</option>
+                <option value="bill_payment">Bill Payment</option>
+                <option value="payroll">Payroll</option>
+              </select>
+              {admin && (
+                <button
+                  onClick={handleClearOldLogs}
+                  className="text-xs text-red-600 hover:text-red-800 font-medium px-3 py-1.5 border border-red-200 rounded-lg hover:bg-red-50 transition"
+                >
+                  Clear logs older than 90 days
+                </button>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="text-left py-2 px-3 text-gray-500 font-medium text-xs">Date / Time</th>
+                    <th className="text-left py-2 px-3 text-gray-500 font-medium text-xs">User</th>
+                    <th className="text-left py-2 px-3 text-gray-500 font-medium text-xs">Action</th>
+                    <th className="text-left py-2 px-3 text-gray-500 font-medium text-xs">Entity</th>
+                    <th className="text-left py-2 px-3 text-gray-500 font-medium text-xs">Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditLogs.length === 0 ? (
+                    <tr><td colSpan="5" className="text-center py-8 text-gray-400 text-sm">No audit logs found</td></tr>
+                  ) : (
+                    auditLogs.map(log => (
+                      <tr key={log.id} className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="py-2.5 px-3 text-xs text-gray-500 whitespace-nowrap">
+                          {new Date(log.created_at).toLocaleString()}
+                        </td>
+                        <td className="py-2.5 px-3 text-xs text-gray-700">{log.user_name || '—'}</td>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                            log.action === 'CREATE'  ? 'bg-green-50 text-green-700' :
+                            log.action === 'DELETE'  ? 'bg-red-50 text-red-700' :
+                            log.action === 'UPDATE'  ? 'bg-blue-50 text-blue-700' :
+                            log.action === 'PROCESS' ? 'bg-purple-50 text-purple-700' :
+                            log.action === 'LOGIN'   ? 'bg-gray-100 text-gray-600' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>
+                            {log.action}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-xs text-gray-600 capitalize">{log.entity}</td>
+                        <td className="py-2.5 px-3 text-xs text-gray-500">{log.description}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── DATA RESET ── */}
       {tab === 'danger' && (
         <div className="max-w-lg">
           <div className="bg-white rounded-xl border border-red-100 shadow-sm p-6">
             <div className="flex items-start gap-3 mb-4">
-              <span className="text-2xl">⚠️</span>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#b91c1c" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0,marginTop:2}}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
               <div>
                 <h2 className="text-base font-semibold text-red-700">Data Reset</h2>
                 <p className="text-sm text-gray-500 mt-1">
@@ -1326,8 +1427,10 @@ export default function Settings() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md p-6">
             <div className="text-center mb-4">
-              <span className="text-4xl">⚠️</span>
-              <h2 className="text-lg font-bold text-red-700 mt-2">Confirm Data Reset</h2>
+              <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-3">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#b91c1c" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              </div>
+              <h2 className="text-lg font-bold text-red-700">Confirm Data Reset</h2>
               <p className="text-sm text-gray-500 mt-1">
                 This will permanently delete all transaction data. This cannot be undone.
               </p>
@@ -1424,8 +1527,10 @@ export default function Settings() {
       {deleteUserTarget && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-sm p-6 text-center">
-            <span className="text-4xl">⚠️</span>
-            <h2 className="text-base font-semibold text-gray-800 mt-3 mb-2">Delete User?</h2>
+            <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-3">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#b91c1c" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </div>
+            <h2 className="text-base font-semibold text-gray-800 mb-2">Delete User?</h2>
             <p className="text-sm text-gray-500 mb-5">
               Are you sure you want to delete <strong>{deleteUserTarget.name}</strong>? This cannot be undone.
             </p>

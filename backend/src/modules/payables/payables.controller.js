@@ -1,17 +1,31 @@
 import pool from '../../config/db.js';
 import { assertPositiveAmount, assertStringLength, AppError, handleError } from '../../middleware/validate.js';
+import { logAudit } from '../audit/audit.controller.js';
+
+// ─── STARTUP MIGRATIONS ──────────────────────────────────
+(async () => {
+  try {
+    await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS vat_number VARCHAR(50)`);
+    await pool.query(`ALTER TABLE bills ADD COLUMN IF NOT EXISTS vat_amount NUMERIC(15,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE bill_items ADD COLUMN IF NOT EXISTS vat_rate NUMERIC(5,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE bill_items ADD COLUMN IF NOT EXISTS vat_amount NUMERIC(15,2) DEFAULT 0`);
+    console.log('[Payables] Startup migrations done');
+  } catch (e) {
+    console.error('[Payables] Migration error:', e.message);
+  }
+})();
 
 // ─── SUPPLIERS ───────────────────────────────────────────
 
 export const createSupplier = async (req, res) => {
-  const { name, email, phone, address, supplier_type } = req.body;
+  const { name, email, phone, address, supplier_type, vat_number } = req.body;
   const { tenantId } = req.user;
 
   try {
     const result = await pool.query(
-      `INSERT INTO suppliers (tenant_id, name, email, phone, address, supplier_type)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [tenantId, name, email, phone, address, supplier_type || 'company']
+      `INSERT INTO suppliers (tenant_id, name, email, phone, address, supplier_type, vat_number)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [tenantId, name, email, phone, address, supplier_type || 'company', vat_number || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -35,13 +49,13 @@ export const getSuppliers = async (req, res) => {
 
 export const updateSupplier = async (req, res) => {
   const { id } = req.params;
-  const { name, email, phone, address, supplier_type } = req.body;
+  const { name, email, phone, address, supplier_type, vat_number } = req.body;
   const { tenantId } = req.user;
   try {
     const result = await pool.query(
-      `UPDATE suppliers SET name=$1, email=$2, phone=$3, address=$4, supplier_type=$5
-       WHERE id=$6 AND tenant_id=$7 RETURNING *`,
-      [name, email, phone, address, supplier_type, id, tenantId]
+      `UPDATE suppliers SET name=$1, email=$2, phone=$3, address=$4, supplier_type=$5, vat_number=$6
+       WHERE id=$7 AND tenant_id=$8 RETURNING *`,
+      [name, email, phone, address, supplier_type, vat_number || null, id, tenantId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Supplier not found' });
     res.json(result.rows[0]);
@@ -78,19 +92,26 @@ export const createBill = async (req, res) => {
     const subtotal = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
     const tax_amount = (subtotal * (tax_rate || 0)) / 100;
     const total_amount = subtotal + tax_amount;
+    // Per-item VAT
+    const total_vat_amount = items.reduce((sum, item) => {
+      const rate = item.vat_rate !== undefined ? Number(item.vat_rate) : 16;
+      return sum + (item.quantity * item.unit_price * rate / 100);
+    }, 0);
 
     const billResult = await client.query(
-      `INSERT INTO bills (tenant_id, supplier_id, bill_number, date, due_date, subtotal, tax_rate, tax_amount, total_amount, balance_due, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11) RETURNING *`,
-      [tenantId, supplier_id, bill_number, date, due_date, subtotal, tax_rate || 0, tax_amount, total_amount, notes, userId]
+      `INSERT INTO bills (tenant_id, supplier_id, bill_number, date, due_date, subtotal, tax_rate, tax_amount, total_amount, balance_due, notes, created_by, vat_amount)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12) RETURNING *`,
+      [tenantId, supplier_id, bill_number, date, due_date, subtotal, tax_rate || 0, tax_amount, total_amount, notes, userId, total_vat_amount]
     );
     const bill = billResult.rows[0];
 
     for (const item of items) {
+      const itemVatRate = item.vat_rate !== undefined ? Number(item.vat_rate) : 16;
+      const itemVatAmount = item.quantity * item.unit_price * itemVatRate / 100;
       await client.query(
-        `INSERT INTO bill_items (bill_id, description, quantity, unit_price, total)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [bill.id, item.description, item.quantity, item.unit_price, item.quantity * item.unit_price]
+        `INSERT INTO bill_items (bill_id, description, quantity, unit_price, total, vat_rate, vat_amount)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [bill.id, item.description, item.quantity, item.unit_price, item.quantity * item.unit_price, itemVatRate, itemVatAmount]
       );
     }
 
@@ -125,6 +146,7 @@ export const createBill = async (req, res) => {
     // ────────────────────────────────────────────────────────────────
 
     await client.query('COMMIT');
+    logAudit(req, 'CREATE', 'bill', bill.id, `Created bill ${bill_number} for supplier ${supplier_id}`);
     res.status(201).json(bill);
   } catch (err) {
     await client.query('ROLLBACK');
@@ -227,42 +249,13 @@ export const recordBillPayment = async (req, res) => {
       `SELECT id FROM accounts WHERE code = '1004' AND tenant_id = $1`, [tenantId]
     );
 
-    // Route to the correct cash account based on payment method
-    // cash → 1001 (Cash at Hand), bank/mpesa/cheque → 1002 (Bank Account)
-    const cashAccountCode = payment_method === 'cash' ? '1001' : '1002';
-    const cashAccountRes = await client.query(
-      `SELECT id FROM accounts WHERE code = $1 AND tenant_id = $2`, [cashAccountCode, tenantId]
-    );
-
     if (apAccountRes.rows.length === 0) {
-      throw new Error("Account 1004 (Payball A/P) is missing from Chart of Accounts.");
+      throw new Error("Account 1004 (Accounts Payable) is missing from Chart of Accounts.");
     }
-    if (cashAccountRes.rows.length === 0) {
-      throw new Error(`Account ${cashAccountCode} (${payment_method === 'cash' ? 'Cash at Hand' : 'Bank Account'}) is missing from Chart of Accounts.`);
-    }
-
     const apAccountId = apAccountRes.rows[0].id;
-    const cashAccountId = cashAccountRes.rows[0].id;
 
-    const entryRes = await client.query(
-      `INSERT INTO journal_entries (tenant_id, date, description, created_by) VALUES ($1, $2, $3, $4) RETURNING id`,
-      [tenantId, payment_date, `Payment for Bill #${bill.bill_number} (${payment_method})`, userId]
-    );
-
-    // Dr Payball A/P (clears liability), Cr Cash/Bank (money goes out)
-    await client.query(
-      `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1, $2, $3, 0), ($1, $4, 0, $3)`,
-      [entryRes.rows[0].id, apAccountId, amount, cashAccountId]
-    );
-
-    // Update balances: A/P liability reduces, Cash/Bank decreases
-    await client.query(`UPDATE accounts SET balance = balance + $1 WHERE id = $2 AND tenant_id = $3`, [amount, apAccountId, tenantId]);
-    await client.query(`UPDATE accounts SET balance = balance - $1 WHERE id = $2 AND tenant_id = $3`, [amount, cashAccountId, tenantId]);
-    // ────────────────────────────────────────────────────────────────────────────────
-
-    // ─── DEDUCT FROM BANK ACCOUNT (Banking module) ───────────────────────────
-    // If bank_account_id is provided use it; otherwise auto-route to the first
-    // account of matching type so the transaction always appears in Banking.
+    // ─── Resolve which bank account and its specific GL account ──────────────
+    // Use the provided bank_account_id, or auto-pick the first matching type
     let effectiveBankId = bank_account_id || null;
     if (!effectiveBankId) {
       const targetType = payment_method === 'cash' ? 'cash' : 'bank';
@@ -272,6 +265,44 @@ export const recordBillPayment = async (req, res) => {
       );
       effectiveBankId = primaryAcc.rows[0]?.id || null;
     }
+
+    // Get the specific GL account linked to this bank account
+    let cashAccountId = null;
+    if (effectiveBankId) {
+      const bankRec = (await client.query(
+        `SELECT gl_account_id, account_type FROM bank_accounts WHERE id=$1 AND tenant_id=$2`,
+        [effectiveBankId, tenantId]
+      )).rows[0];
+      if (bankRec?.gl_account_id) {
+        cashAccountId = bankRec.gl_account_id;
+      } else {
+        // Fall back to generic code if bank account has no GL link yet
+        const fallbackCode = bankRec?.account_type === 'cash' ? '1001' : '1002';
+        const fallback = (await client.query(
+          `SELECT id FROM accounts WHERE code=$1 AND tenant_id=$2`, [fallbackCode, tenantId]
+        )).rows[0];
+        cashAccountId = fallback?.id || null;
+      }
+    }
+
+    if (!cashAccountId) {
+      throw new Error('Could not resolve a GL account for the payment. Ensure the bank account has a linked GL account.');
+    }
+
+    const entryRes = await client.query(
+      `INSERT INTO journal_entries (tenant_id, date, description, created_by) VALUES ($1, $2, $3, $4) RETURNING id`,
+      [tenantId, payment_date, `Payment for Bill #${bill.bill_number} (${payment_method})`, userId]
+    );
+
+    // Dr Accounts Payable (clears liability), Cr specific Bank/Cash GL (money goes out)
+    await client.query(
+      `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1, $2, $3, 0), ($1, $4, 0, $3)`,
+      [entryRes.rows[0].id, apAccountId, amount, cashAccountId]
+    );
+    await client.query(`UPDATE accounts SET balance = balance + $1 WHERE id = $2 AND tenant_id = $3`, [amount, apAccountId, tenantId]);
+    await client.query(`UPDATE accounts SET balance = balance - $1 WHERE id = $2 AND tenant_id = $3`, [amount, cashAccountId, tenantId]);
+
+    // ─── DEDUCT FROM BANK ACCOUNT (Banking module) ───────────────────────────
     if (effectiveBankId) {
       await client.query(
         `UPDATE bank_accounts SET current_balance = current_balance - $1 WHERE id = $2 AND tenant_id = $3`,
@@ -286,6 +317,7 @@ export const recordBillPayment = async (req, res) => {
     // ─────────────────────────────────────────────────────────────────────────
 
     await client.query('COMMIT');
+    logAudit(req, 'CREATE', 'bill_payment', bill_id, `Recorded bill payment of ${amount} for bill ${bill_id}`);
     res.status(201).json(paymentResult.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');
@@ -385,6 +417,7 @@ export const deleteBill = async (req, res) => {
     await client.query(`DELETE FROM bill_items WHERE bill_id=$1`, [id]);
     await client.query(`DELETE FROM bills WHERE id=$1 AND tenant_id=$2`, [id, tenantId]);
     await client.query('COMMIT');
+    logAudit(req, 'DELETE', 'bill', id, `Deleted bill ${bill.bill_number}`);
     res.json({ message: 'Bill deleted' });
   } catch (err) {
     await client.query('ROLLBACK');

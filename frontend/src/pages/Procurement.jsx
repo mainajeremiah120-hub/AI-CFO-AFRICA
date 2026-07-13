@@ -864,9 +864,9 @@ export default function Procurement() {
               )}
               <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
                 <p className="text-xs text-blue-700 font-medium">Auto-wired on receipt:</p>
-                <p className="text-xs text-blue-600 mt-1">✅ Inventory stock updated for mapped items</p>
-                <p className="text-xs text-blue-600">✅ Bill created in Payables automatically</p>
-                <p className="text-xs text-blue-600">✅ Journal entry posted to Accounting</p>
+                <p className="text-xs text-blue-600 mt-1">— Inventory stock updated for mapped items</p>
+                <p className="text-xs text-blue-600">— Bill created in Payables automatically</p>
+                <p className="text-xs text-blue-600">— Journal entry posted to Accounting</p>
               </div>
 
               <button

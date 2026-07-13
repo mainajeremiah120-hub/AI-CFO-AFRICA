@@ -1,6 +1,93 @@
 import pool from '../../config/db.js';
 import { AppError, assertPositiveAmount, handleError } from '../../middleware/validate.js';
 
+// ─── PERIOD LOCKING — bootstrap ─────────────────────────
+(async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS locked_periods (
+        id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id      UUID NOT NULL,
+        year           INT  NOT NULL,
+        month          INT  NOT NULL DEFAULT 0,
+        locked_by      UUID,
+        locked_by_name TEXT,
+        locked_at      TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (tenant_id, year, month)
+      )
+    `);
+  } catch (err) {
+    console.error('[accounting] locked_periods bootstrap error:', err.message);
+  }
+})();
+
+// ─── isDateLocked — internal helper ─────────────────────
+export const isDateLocked = async (client, tenantId, date) => {
+  if (!date) return false;
+  const d = new Date(date);
+  const year  = d.getFullYear();
+  const month = d.getMonth() + 1;  // 1-12
+  const result = await client.query(
+    `SELECT id FROM locked_periods
+     WHERE tenant_id = $1
+       AND year = $2
+       AND (month = 0 OR month = $3)`,
+    [tenantId, year, month]
+  );
+  return result.rows.length > 0;
+};
+
+// ─── getLockedPeriods ────────────────────────────────────
+export const getLockedPeriods = async (req, res) => {
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `SELECT * FROM locked_periods WHERE tenant_id = $1 ORDER BY year DESC, month DESC`,
+      [tenantId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ─── lockPeriod ──────────────────────────────────────────
+export const lockPeriod = async (req, res) => {
+  const { year, month = 0 } = req.body;
+  const { tenantId, userId } = req.user;
+  try {
+    const result = await pool.query(
+      `INSERT INTO locked_periods (tenant_id, year, month, locked_by, locked_by_name)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (tenant_id, year, month) DO NOTHING
+       RETURNING *`,
+      [tenantId, year, month, userId, req.user.name || null]
+    );
+    if (result.rows.length === 0) {
+      return res.status(409).json({ error: 'This period is already locked' });
+    }
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ─── unlockPeriod ────────────────────────────────────────
+export const unlockPeriod = async (req, res) => {
+  const { id } = req.params;
+  const { tenantId } = req.user;
+  try {
+    const result = await pool.query(
+      `DELETE FROM locked_periods WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+      [id, tenantId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Locked period not found' });
+    res.json({ message: 'Period unlocked' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 // ─── ACCOUNTS ───────────────────────────────────────────
 
 export const createAccount = async (req, res) => {
@@ -85,10 +172,17 @@ export const createJournalEntry = async (req, res) => {
   try {
     await client.query('BEGIN');
 
+    // ─ Period locking check ─
+    const entryDate = date || new Date();
+    if (await isDateLocked(client, tenantId, entryDate)) {
+      await client.query('ROLLBACK');
+      return res.status(423).json({ error: 'Cannot post entries to a locked accounting period' });
+    }
+
     const entryResult = await client.query(
       `INSERT INTO journal_entries (tenant_id, date, description, reference, created_by)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [tenantId, date || new Date(), description, reference, userId]
+      [tenantId, entryDate, description, reference, userId]
     );
     const entry = entryResult.rows[0];
 
@@ -117,6 +211,19 @@ export const createJournalEntry = async (req, res) => {
         `UPDATE accounts SET balance = balance + $1 - $2 WHERE id = $3`,
         [debit, credit, line.account_id]
       );
+
+      // Sync the linked bank account balance (if this GL account backs a specific bank account)
+      const bankLink = (await client.query(
+        `SELECT id FROM bank_accounts WHERE gl_account_id=$1 AND tenant_id=$2`,
+        [line.account_id, tenantId]
+      )).rows[0];
+      if (bankLink) {
+        // Dr increases bank balance (asset +), Cr decreases it (asset -)
+        await client.query(
+          `UPDATE bank_accounts SET current_balance = current_balance + $1 - $2 WHERE id = $3`,
+          [debit, credit, bankLink.id]
+        );
+      }
     }
 
     await client.query('COMMIT');

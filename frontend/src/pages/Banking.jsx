@@ -448,7 +448,7 @@ export default function Banking() {
                   Total Out: KES {ledgerTotals.out.toLocaleString()}
                 </span>
                 <span className="text-gray-700 font-semibold">
-                  Net: KES {(ledgerTotals.in - ledgerTotals.out).toLocaleString()}
+                  Net: KES {Math.abs(ledgerTotals.in - ledgerTotals.out).toLocaleString()}
                 </span>
               </div>
             </div>
@@ -582,6 +582,11 @@ export default function Banking() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
               </div>
+              {!editingAccountId && (
+                <p className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                  A dedicated GL sub-account (e.g. <strong>1002-001</strong> for KCB, <strong>1002-002</strong> for Equity) will be created automatically. Journal entries will clearly show which bank is affected.
+                </p>
+              )}
               <div className="flex gap-2">
                 <button
                   type="submit"
@@ -632,9 +637,16 @@ export default function Banking() {
                       <div>
                         <p className="text-sm font-semibold text-gray-800">{acc.account_name}</p>
                         <p className="text-xs text-gray-400">{acc.bank_name} {acc.account_number ? `· ${acc.account_number}` : ''}</p>
-                        <span className={`mt-1 inline-block px-2 py-0.5 rounded-full text-xs font-medium ${accountTypeColor(acc.account_type)}`}>
-                          {acc.account_type}
-                        </span>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${accountTypeColor(acc.account_type)}`}>
+                            {acc.account_type}
+                          </span>
+                          {acc.gl_account_code && (
+                            <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 font-mono">
+                              GL: {acc.gl_account_code}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div className="text-right">
                         <p className="text-lg font-bold text-gray-800">KES {Number(acc.current_balance).toLocaleString()}</p>
@@ -775,7 +787,7 @@ export default function Banking() {
                         <p className="text-xs text-gray-400">{tx.account_name} · {new Date(tx.transaction_date).toLocaleDateString()}</p>
                       </div>
                       <p className={`text-sm font-bold ${tx.transaction_type === 'credit' ? 'text-green-600' : 'text-red-600'}`}>
-                        {tx.transaction_type === 'credit' ? '+' : '-'} KES {Number(tx.amount).toLocaleString()}
+                        KES {Number(Math.abs(tx.amount)).toLocaleString()}
                       </p>
                     </div>
                     <div className="flex justify-between items-center mt-2">
@@ -916,7 +928,7 @@ export default function Banking() {
                         <p className="text-xs text-gray-400">{tx.transaction_id} · {tx.phone_number}</p>
                       </div>
                       <p className={`text-sm font-bold ${tx.direction === 'in' ? 'text-green-600' : 'text-red-600'}`}>
-                        {tx.direction === 'in' ? '+' : '-'} KES {Number(tx.amount).toLocaleString()}
+                        KES {Number(Math.abs(tx.amount)).toLocaleString()}
                       </p>
                     </div>
                     <div className="flex justify-between mt-2">

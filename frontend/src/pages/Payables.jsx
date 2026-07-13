@@ -2,6 +2,81 @@ import { useState, useEffect } from 'react';
 import MainLayout from '../components/layout/MainLayout';
 import API from '../api/axios';
 import { isAdmin } from '../utils/auth';
+import { exportCSV } from '../utils/exportCSV';
+
+const printBill = async (bill) => {
+  try {
+    const res = await API.get('/payables/bills/' + bill.id);
+    const data = res.data;
+    const company = (() => { try { return JSON.parse(localStorage.getItem('company') || '{}'); } catch { return {}; } })();
+    const companyName = company.name || 'Your Company';
+    const items = (data.items || []).filter(it => it && it.description);
+    const subtotal = items.reduce((s, it) => s + Number(it.total || 0), 0);
+    const taxAmt = Number(data.tax_amount || 0);
+    const grand = Number(data.total_amount || 0);
+    const win = window.open('', '_blank');
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Bill ${data.bill_number}</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, sans-serif; font-size: 13px; color: #222; padding: 40px; }
+  .header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:32px; }
+  .company { font-size:20px; font-weight:700; color:#a31b32; }
+  .bill-label { font-size:28px; font-weight:800; color:#a31b32; text-align:right; }
+  .meta { margin-bottom:28px; display:flex; justify-content:space-between; }
+  .meta-block h3 { font-size:11px; text-transform:uppercase; color:#888; margin-bottom:6px; }
+  .meta-block p { font-size:13px; }
+  table { width:100%; border-collapse:collapse; margin-bottom:20px; }
+  th { background:#f4f4f4; text-align:left; padding:9px 10px; font-size:12px; border-bottom:2px solid #ddd; }
+  td { padding:8px 10px; border-bottom:1px solid #eee; vertical-align:top; }
+  .text-right { text-align:right; }
+  .totals { width:280px; margin-left:auto; }
+  .totals tr td { border:none; padding:5px 10px; }
+  .totals .grand td { font-weight:700; font-size:15px; border-top:2px solid #333; padding-top:8px; }
+  .status-badge { display:inline-block; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:600; text-transform:uppercase;
+    background: ${data.status === 'paid' ? '#dcfce7' : data.status === 'overdue' ? '#fee2e2' : '#fef3c7'};
+    color: ${data.status === 'paid' ? '#166534' : data.status === 'overdue' ? '#991b1b' : '#92400e'}; }
+  .footer { margin-top:40px; border-top:1px solid #eee; padding-top:16px; font-size:11px; color:#888; text-align:center; }
+  @media print { body { padding:20px; } }
+</style></head><body>
+<div class="header">
+  <div><div class="company">${companyName}</div></div>
+  <div><div class="bill-label">PURCHASE BILL</div><div style="text-align:right;font-size:13px;color:#555;margin-top:4px;">${data.bill_number}</div></div>
+</div>
+<div class="meta">
+  <div class="meta-block">
+    <h3>Supplier</h3>
+    <p><strong>${data.supplier_name || ''}</strong></p>
+    ${data.supplier_email ? `<p style="color:#888">${data.supplier_email}</p>` : ''}
+    ${data.supplier_phone ? `<p style="color:#888">${data.supplier_phone}</p>` : ''}
+  </div>
+  <div class="meta-block" style="text-align:right">
+    <h3>Bill Date</h3>
+    <p>${data.date ? new Date(data.date).toLocaleDateString() : ''}</p>
+    <h3 style="margin-top:8px">Due Date</h3>
+    <p>${data.due_date ? new Date(data.due_date).toLocaleDateString() : ''}</p>
+    <div style="margin-top:8px"><span class="status-badge">${data.status || 'unpaid'}</span></div>
+  </div>
+</div>
+<table>
+  <thead><tr><th>Description</th><th class="text-right">Qty</th><th class="text-right">Unit Price</th><th class="text-right">Total</th></tr></thead>
+  <tbody>
+    ${items.map(it => `<tr><td>${it.description}</td><td class="text-right">${Number(it.quantity).toLocaleString()}</td><td class="text-right">KES ${Number(it.unit_price).toLocaleString()}</td><td class="text-right">KES ${Number(it.total).toLocaleString()}</td></tr>`).join('')}
+  </tbody>
+</table>
+<table class="totals">
+  <tr><td>Subtotal</td><td class="text-right">KES ${subtotal.toLocaleString()}</td></tr>
+  <tr><td>Tax</td><td class="text-right">KES ${taxAmt.toLocaleString()}</td></tr>
+  <tr class="grand"><td>Grand Total</td><td class="text-right">KES ${grand.toLocaleString()}</td></tr>
+</table>
+${data.notes ? `<div style="margin-top:16px;padding:12px;background:#f9f9f9;border-radius:6px;font-size:12px;color:#555"><strong>Notes:</strong> ${data.notes}</div>` : ''}
+<div class="footer">${companyName} &mdash; Thank you for your business!</div>
+<script>window.onload = function(){ window.print(); }<\/script>
+</body></html>`);
+    win.document.close();
+  } catch (err) {
+    alert('Failed to load bill details for printing');
+  }
+};
 
 export default function Payables() {
   const admin = isAdmin();
@@ -514,7 +589,7 @@ export default function Payables() {
 
             {!editingBillId && (
               <div className="flex items-start gap-3 bg-amber-50 border border-amber-100 rounded-lg px-4 py-3 mb-4">
-                <span className="text-amber-500 text-lg mt-0.5">📋</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0,marginTop:2}}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
                 <div>
                   <p className="text-xs font-semibold text-amber-800">Auto-journalized via Payball Account-1004</p>
                   <p className="text-xs text-amber-700 mt-0.5">
@@ -676,9 +751,26 @@ export default function Payables() {
 
           {/* Bills List */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-            <h2 className="text-base font-semibold text-gray-800 mb-4">
-              Bills <span className="text-gray-400 font-normal text-sm">({bills.length})</span>
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold text-gray-800">
+                Bills <span className="text-gray-400 font-normal text-sm">({bills.length})</span>
+              </h2>
+              <button
+                onClick={() => exportCSV(bills, 'bills.csv', [
+                  {key:'bill_number',label:'Bill #'},
+                  {key:'supplier_name',label:'Supplier'},
+                  {key:'date',label:'Date'},
+                  {key:'due_date',label:'Due Date'},
+                  {key:'total_amount',label:'Total'},
+                  {key:'amount_paid',label:'Paid'},
+                  {key:'balance_due',label:'Balance'},
+                  {key:'status',label:'Status'},
+                ])}
+                className="text-xs text-gray-600 hover:text-gray-800 font-medium px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
+              >
+                Export CSV
+              </button>
+            </div>
             <div className="space-y-3 max-h-screen overflow-y-auto">
               {bills.length === 0 ? (
                 <p className="text-center text-gray-400 text-sm py-8">No bills yet</p>
@@ -700,7 +792,9 @@ export default function Payables() {
                     </div>
                     <div className="text-xs text-gray-400 mt-1">Due: {new Date(bill.due_date).toLocaleDateString()}</div>
                     <div className="flex gap-3 mt-3 pt-2 border-t border-gray-100">
-                      <span className="text-xs text-gray-400 italic">Use Credit Notes to correct or reverse this bill</span>
+                      <button onClick={() => printBill(bill)} className="text-xs text-gray-600 hover:text-gray-800 font-medium">Print</button>
+                      {admin && <button onClick={() => handleEditBill(bill)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>}
+                      {admin && <button onClick={() => handleDeleteBill(bill.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Delete</button>}
                     </div>
                   </div>
                 ))
@@ -717,7 +811,7 @@ export default function Payables() {
             <h2 className="text-base font-semibold text-gray-800 mb-4">Record Payment</h2>
 
             <div className="flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 mb-4">
-              <span className="text-blue-500 text-lg mt-0.5">🏦</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0,marginTop:2}}><line x1="3" y1="22" x2="21" y2="22"/><line x1="6" y1="18" x2="6" y2="11"/><line x1="10" y1="18" x2="10" y2="11"/><line x1="14" y1="18" x2="14" y2="11"/><line x1="18" y1="18" x2="18" y2="11"/><polygon points="12 2 20 7 4 7"/></svg>
               <div>
                 <p className="text-xs font-semibold text-blue-800">Payball Account-1004 (Accounts Payable)</p>
                 <p className="text-xs text-blue-600 mt-0.5">

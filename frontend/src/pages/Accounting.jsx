@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import MainLayout from '../components/layout/MainLayout';
 import API from '../api/axios';
+import { isAdmin } from '../utils/auth';
 
 const Pencil = () => (
   <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
@@ -15,7 +16,10 @@ const Trash = () => (
 
 const ACCOUNT_TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'];
 
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
 export default function Accounting() {
+  const admin = isAdmin();
   const [tab, setTab] = useState('accounts');
   const [accounts, setAccounts] = useState([]);
   const [journalEntries, setJournalEntries] = useState([]);
@@ -24,6 +28,10 @@ export default function Accounting() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const seedingRef = useRef(false);
+
+  // Period locking
+  const [lockedPeriods, setLockedPeriods] = useState([]);
+  const [periodForm, setPeriodForm] = useState({ year: new Date().getFullYear(), month: new Date().getMonth() + 1 });
 
   const [editEntry, setEditEntry] = useState(null);
   const [editEntryForm, setEditEntryForm] = useState({ description: '', reference: '' });
@@ -53,7 +61,45 @@ export default function Accounting() {
   useEffect(() => {
     if (tab === 'journal') fetchJournalEntries();
     if (tab === 'trial-balance') fetchTrialBalance();
+    if (tab === 'periods') fetchLockedPeriods();
   }, [tab]);
+
+  const fetchLockedPeriods = async () => {
+    try {
+      const res = await API.get('/accounting/locked-periods');
+      setLockedPeriods(res.data);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to fetch locked periods');
+    }
+  };
+
+  const handleLockPeriod = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      await API.post('/accounting/locked-periods', periodForm);
+      setSuccess('Period locked successfully');
+      fetchLockedPeriods();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to lock period');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUnlockPeriod = async (id) => {
+    if (!window.confirm('Unlock this period? Journal entries can then be posted to these dates.')) return;
+    try {
+      await API.delete(`/accounting/locked-periods/${id}`);
+      setSuccess('Period unlocked');
+      fetchLockedPeriods();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to unlock period');
+    }
+  };
 
   const fetchAccounts = async () => {
     try {
@@ -159,6 +205,7 @@ export default function Accounting() {
     { key: 'accounts', label: 'Chart of Accounts' },
     { key: 'journal', label: 'Journal Entries' },
     { key: 'trial-balance', label: 'Trial Balance' },
+    { key: 'periods', label: 'Periods' },
   ];
 
   return (
@@ -499,6 +546,93 @@ export default function Accounting() {
           <p className="text-xs text-gray-400 mt-3">
             Computed from journal lines — automatically reconciled on load.
           </p>
+        </div>
+      )}
+
+      {/* ── PERIOD LOCKING ── */}
+      {tab === 'periods' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+          {/* Locked Periods List */}
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+            <div className="flex items-start gap-3 bg-amber-50 border border-amber-100 rounded-lg px-4 py-3 mb-5">
+              <span className="text-amber-500 text-lg mt-0.5">🔒</span>
+              <p className="text-xs text-amber-800">
+                Locked periods prevent journal entries from being posted to those dates. Existing entries are not affected.
+              </p>
+            </div>
+            <h2 className="text-base font-semibold text-gray-800 mb-4">
+              Locked Periods <span className="text-gray-400 font-normal text-sm">({lockedPeriods.length})</span>
+            </h2>
+            <div className="space-y-2">
+              {lockedPeriods.length === 0 ? (
+                <p className="text-center text-gray-400 text-sm py-8">No locked periods</p>
+              ) : (
+                lockedPeriods.map(lp => (
+                  <div key={lp.id} className="flex items-center justify-between border border-gray-100 rounded-lg px-4 py-3">
+                    <div>
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-100">
+                        🔒 {lp.month === 0 ? `${lp.year} (Whole Year)` : `${MONTHS[lp.month - 1]} ${lp.year}`}
+                      </span>
+                      {lp.locked_by_name && (
+                        <p className="text-xs text-gray-400 mt-1">Locked by {lp.locked_by_name} · {new Date(lp.locked_at).toLocaleDateString()}</p>
+                      )}
+                    </div>
+                    {admin && (
+                      <button
+                        onClick={() => handleUnlockPeriod(lp.id)}
+                        className="text-xs text-gray-500 hover:text-red-600 font-medium px-2 py-1 rounded hover:bg-red-50 transition"
+                      >
+                        Unlock
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Lock Period Form */}
+          {admin && (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+              <h2 className="text-base font-semibold text-gray-800 mb-4">Lock a Period</h2>
+              <form onSubmit={handleLockPeriod} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Month</label>
+                  <select
+                    value={periodForm.month}
+                    onChange={e => setPeriodForm({ ...periodForm, month: Number(e.target.value) })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value={0}>Whole Year (all months)</option>
+                    {MONTHS.map((m, i) => (
+                      <option key={i+1} value={i+1}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
+                  <input
+                    type="number"
+                    value={periodForm.year}
+                    onChange={e => setPeriodForm({ ...periodForm, year: Number(e.target.value) })}
+                    required
+                    min="2000"
+                    max="2100"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full text-white font-medium py-2 rounded-lg text-sm transition disabled:opacity-50"
+                  style={{ backgroundColor: '#a31b32' }}
+                >
+                  {loading ? 'Locking...' : 'Lock Period'}
+                </button>
+              </form>
+            </div>
+          )}
         </div>
       )}
 

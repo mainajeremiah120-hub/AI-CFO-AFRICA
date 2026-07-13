@@ -1,8 +1,21 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import speakeasy from 'speakeasy';
+import qrcode from 'qrcode';
 import pool from '../../config/db.js';
 import { sendWelcomeEmail } from '../../config/mailer.js';
 import { assertPasswordStrength, AppError, handleError } from '../../middleware/validate.js';
+
+// ── DB migration — add TOTP columns if they don't exist ──────────────────────
+(async () => {
+  try {
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(200)`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN DEFAULT false`);
+    console.log('[2FA] TOTP columns ready');
+  } catch (err) {
+    console.error('[2FA] Migration error:', err.message);
+  }
+})();
 
 const DEFAULT_ACCOUNTS = [
   { code: '1000', name: 'Owner injection Capital',  type: 'equity' },
@@ -72,7 +85,7 @@ export const register = async (req, res) => {
 
     res.status(201).json({
       token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, totp_enabled: false },
       company,
     });
   } catch (err) {
@@ -93,6 +106,16 @@ export const login = async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
 
+    // Check if 2FA is enabled — issue partial token and prompt for OTP
+    if (user.totp_enabled) {
+      const partialToken = jwt.sign(
+        { userId: user.id, tenantId: user.tenant_id, requires_2fa: true },
+        process.env.JWT_SECRET,
+        { expiresIn: '5m' }
+      );
+      return res.json({ requires_2fa: true, partial_token: partialToken });
+    }
+
     const token = jwt.sign(
       { userId: user.id, tenantId: user.tenant_id, role: user.role },
       process.env.JWT_SECRET,
@@ -105,7 +128,149 @@ export const login = async (req, res) => {
 
     res.json({
       token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, totp_enabled: user.totp_enabled ?? false },
+      company: companyResult.rows[0] || null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ── 2FA: Generate secret + QR code ───────────────────────────────────────────
+export const setup2FA = async (req, res) => {
+  try {
+    const secret = speakeasy.generateSecret({
+      name: 'AI CFO Africa (' + req.user.email + ')',
+      length: 20,
+    });
+
+    // Store secret (not yet enabled) so verify step can read it
+    await pool.query(
+      `UPDATE users SET totp_secret = $1 WHERE id = $2`,
+      [secret.base32, req.user.userId]
+    );
+
+    const dataUrl = await qrcode.toDataURL(secret.otpauth_url);
+
+    res.json({ qr_code: dataUrl, secret: secret.base32 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ── 2FA: Verify code from authenticator and enable 2FA ───────────────────────
+export const verify2FASetup = async (req, res) => {
+  const { token } = req.body;
+  try {
+    const result = await pool.query(
+      `SELECT totp_secret FROM users WHERE id = $1`,
+      [req.user.userId]
+    );
+    const user = result.rows[0];
+    if (!user || !user.totp_secret) {
+      return res.status(400).json({ error: '2FA setup not initiated — call /2fa/setup first' });
+    }
+
+    const valid = speakeasy.totp.verify({
+      secret: user.totp_secret,
+      encoding: 'base32',
+      token,
+      window: 1,
+    });
+
+    if (!valid) {
+      return res.status(400).json({ error: 'Invalid code — please try again' });
+    }
+
+    await pool.query(
+      `UPDATE users SET totp_enabled = true WHERE id = $1`,
+      [req.user.userId]
+    );
+
+    res.json({ success: true, message: '2FA enabled successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ── 2FA: Disable (requires valid TOTP) ───────────────────────────────────────
+export const disable2FA = async (req, res) => {
+  const { token } = req.body;
+  try {
+    const result = await pool.query(
+      `SELECT totp_secret FROM users WHERE id = $1`,
+      [req.user.userId]
+    );
+    const user = result.rows[0];
+    if (!user || !user.totp_secret) {
+      return res.status(400).json({ error: '2FA is not enabled on this account' });
+    }
+
+    const valid = speakeasy.totp.verify({
+      secret: user.totp_secret,
+      encoding: 'base32',
+      token,
+      window: 1,
+    });
+
+    if (!valid) {
+      return res.status(400).json({ error: 'Invalid code — please try again' });
+    }
+
+    await pool.query(
+      `UPDATE users SET totp_enabled = false, totp_secret = null WHERE id = $1`,
+      [req.user.userId]
+    );
+
+    res.json({ success: true, message: '2FA disabled successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ── 2FA: Validate OTP during login (no protect — uses partial token) ──────────
+export const validate2FA = async (req, res) => {
+  const { partial_token, token } = req.body;
+  try {
+    let decoded;
+    try {
+      decoded = jwt.verify(partial_token, process.env.JWT_SECRET);
+    } catch {
+      return res.status(401).json({ error: 'Invalid or expired session — please log in again' });
+    }
+
+    if (!decoded.requires_2fa) {
+      return res.status(401).json({ error: 'Invalid partial token' });
+    }
+
+    const result = await pool.query(`SELECT * FROM users WHERE id = $1`, [decoded.userId]);
+    const user = result.rows[0];
+    if (!user) return res.status(401).json({ error: 'User not found' });
+
+    const valid = speakeasy.totp.verify({
+      secret: user.totp_secret,
+      encoding: 'base32',
+      token,
+      window: 1,
+    });
+
+    if (!valid) {
+      return res.status(401).json({ error: 'Invalid 2FA code' });
+    }
+
+    const fullToken = jwt.sign(
+      { userId: user.id, tenantId: user.tenant_id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    const companyResult = await pool.query(
+      `SELECT * FROM companies WHERE id = $1`, [user.tenant_id]
+    );
+
+    res.json({
+      token: fullToken,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, totp_enabled: user.totp_enabled ?? true },
       company: companyResult.rows[0] || null,
     });
   } catch (err) {

@@ -4,6 +4,7 @@ import {
   createJournalEntry, getJournalEntries, updateJournalEntry, deleteJournalEntry,
   getTrialBalance,
   createFiscalYear, getFiscalYears,
+  getLockedPeriods, lockPeriod, unlockPeriod,
 } from './accounting.controller.js';
 import { protect, requireAdmin } from '../../middleware/auth.js';
 
@@ -26,5 +27,10 @@ router.get('/trial-balance', getTrialBalance);
 
 router.post('/fiscal-years', requireAdmin, createFiscalYear);
 router.get('/fiscal-years',  getFiscalYears);
+
+// Locked Periods
+router.get('/locked-periods',        getLockedPeriods);
+router.post('/locked-periods',       requireAdmin, lockPeriod);
+router.delete('/locked-periods/:id', requireAdmin, unlockPeriod);
 
 export default router;

@@ -1,54 +1,84 @@
 import pool from '../../config/db.js';
 import { assertPositiveAmount, assertStringLength, AppError, handleError } from '../../middleware/validate.js';
 
+// ─── Startup migration — add GL link columns to bank_accounts ────────────────
+(async () => {
+  try {
+    await pool.query(`ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS gl_account_id   UUID`);
+    await pool.query(`ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS gl_account_code VARCHAR(20)`);
+  } catch (err) {
+    console.error('[banking] migration error:', err.message);
+  }
+})();
+
+// ─── Internal helper: resolve GL account id for a bank account ───────────────
+async function resolveGLAccount(client, bankAcc, tenantId) {
+  if (bankAcc.gl_account_id) return bankAcc.gl_account_id;
+  const code = bankAcc.account_type === 'cash' ? '1001' : '1002';
+  const r = await client.query(`SELECT id FROM accounts WHERE tenant_id=$1 AND code=$2`, [tenantId, code]);
+  return r.rows[0]?.id || null;
+}
+
 // ─── BANK ACCOUNTS ───────────────────────────────────────
 
 export const createBankAccount = async (req, res) => {
   const { account_name, account_number, bank_name, account_type, current_balance } = req.body;
-  const { tenantId } = req.user;
-
+  const { tenantId, userId } = req.user;
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
 
+    // Auto-generate a dedicated GL sub-account code (e.g. 1002-001, 1002-002)
+    const baseCode = account_type === 'cash' ? '1001' : '1002';
+    const codeCount = (await client.query(
+      `SELECT COUNT(*) as cnt FROM accounts WHERE tenant_id=$1 AND code LIKE $2`,
+      [tenantId, `${baseCode}-%`]
+    )).rows[0].cnt;
+    const glCode = `${baseCode}-${String(Number(codeCount) + 1).padStart(3, '0')}`;
+    const glName = bank_name ? `${account_name} (${bank_name})` : account_name;
+
+    // Create the dedicated GL account for this specific bank account
+    const glAcct = (await client.query(
+      `INSERT INTO accounts (tenant_id, code, name, type, description)
+       VALUES ($1,$2,$3,'asset',$4) RETURNING id`,
+      [tenantId, glCode, glName, `${account_type === 'cash' ? 'Cash' : 'Bank'} account: ${account_name}`]
+    )).rows[0];
+
+    // Create bank account record linked to the GL account
     const result = await client.query(
-      `INSERT INTO bank_accounts (tenant_id, account_name, account_number, bank_name, account_type, current_balance)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [tenantId, account_name, account_number, bank_name, account_type || 'bank', current_balance || 0]
+      `INSERT INTO bank_accounts
+         (tenant_id, account_name, account_number, bank_name, account_type, current_balance, gl_account_id, gl_account_code)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [tenantId, account_name, account_number, bank_name, account_type || 'bank',
+       current_balance || 0, glAcct.id, glCode]
     );
     const bankAccount = result.rows[0];
 
-    // Post opening balance journal entry if balance > 0 (Dr Bank/Cash, Cr Owner's Capital)
+    // Post opening balance journal entry using the dedicated GL account
     if (Number(current_balance) > 0) {
-      const assetCode = account_type === 'cash' ? '1001' : '1002';
-      const [assetAcc, equityAcc] = await Promise.all([
-        client.query(`SELECT id FROM accounts WHERE tenant_id=$1 AND code=$2`, [tenantId, assetCode]),
-        client.query(`SELECT id FROM accounts WHERE tenant_id=$1 AND code='1000'`, [tenantId]),
-      ]);
+      const equityAcc = (await client.query(
+        `SELECT id FROM accounts WHERE tenant_id=$1 AND code='1000'`, [tenantId]
+      )).rows[0];
 
-      if (assetAcc.rows[0]) {
-        const entry = (await client.query(
-          `INSERT INTO journal_entries (tenant_id, date, description, reference, created_by)
-           VALUES ($1, CURRENT_DATE, $2, $3, $4) RETURNING *`,
-          [tenantId, `Opening balance — ${account_name}`, `OB-${account_name}`, req.user.userId]
-        )).rows[0];
+      const entry = (await client.query(
+        `INSERT INTO journal_entries (tenant_id, date, description, reference, created_by)
+         VALUES ($1, CURRENT_DATE, $2, $3, $4) RETURNING *`,
+        [tenantId, `Opening balance — ${account_name}`, `OB-${account_name}`, userId]
+      )).rows[0];
 
-        // Dr Bank/Cash
+      await client.query(
+        `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,$3,0)`,
+        [entry.id, glAcct.id, current_balance]
+      );
+      await client.query(`UPDATE accounts SET balance=balance+$1 WHERE id=$2`, [current_balance, glAcct.id]);
+
+      if (equityAcc) {
         await client.query(
-          `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,$3,0)`,
-          [entry.id, assetAcc.rows[0].id, current_balance]
+          `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,0,$3)`,
+          [entry.id, equityAcc.id, current_balance]
         );
-        await client.query(`UPDATE accounts SET balance=balance+$1 WHERE id=$2`, [current_balance, assetAcc.rows[0].id]);
-
-        // Cr Owner's Capital
-        if (equityAcc.rows[0]) {
-          await client.query(
-            `INSERT INTO journal_lines (journal_entry_id, account_id, debit, credit) VALUES ($1,$2,0,$3)`,
-            [entry.id, equityAcc.rows[0].id, current_balance]
-          );
-          await client.query(`UPDATE accounts SET balance=balance+$1 WHERE id=$2`, [current_balance, equityAcc.rows[0].id]);
-        }
+        await client.query(`UPDATE accounts SET balance=balance+$1 WHERE id=$2`, [current_balance, equityAcc.id]);
       }
     }
 
@@ -79,10 +109,13 @@ export const updateBankAccount = async (req, res) => {
     const newBalance = Number(current_balance);
     const diff = newBalance - Number(existing.current_balance);
     if (diff !== 0) {
-      const accountCode = (account_type || existing.account_type) === 'cash' ? '1001' : '1002';
-      const glAccount = (await client.query(
-        `SELECT id FROM accounts WHERE tenant_id=$1 AND code=$2`, [tenantId, accountCode]
-      )).rows[0];
+      // Use the specific linked GL account if available, else fall back to generic code
+      const glAccount = existing.gl_account_id
+        ? { id: existing.gl_account_id }
+        : (await client.query(
+            `SELECT id FROM accounts WHERE tenant_id=$1 AND code=$2`,
+            [tenantId, (account_type || existing.account_type) === 'cash' ? '1001' : '1002']
+          )).rows[0];
       if (glAccount) {
         const equityAcc = (await client.query(`SELECT id FROM accounts WHERE tenant_id=$1 AND code='1000'`, [tenantId])).rows[0];
         const entry = (await client.query(
@@ -207,20 +240,12 @@ export const createTransaction = async (req, res) => {
       [balanceChange, bank_account_id, tenantId]
     );
 
-    // Post to accounting
-    const bankAccountResult = await client.query(
-      `SELECT * FROM bank_accounts WHERE id = $1 AND tenant_id = $2`, [bank_account_id, tenantId]
-    );
-    const bankAcc = bankAccountResult.rows[0];
-    const accountCode = bankAcc.account_type === 'cash' ? '1001' : '1002';
+    // Post to accounting — use the bank's specific linked GL account
+    const bankAcc = accCheck; // already fetched above
+    const glAccountId = await resolveGLAccount(client, bankAcc, tenantId);
 
-    const accountResult = await client.query(
-      `SELECT id FROM accounts WHERE tenant_id = $1 AND code = $2`,
-      [tenantId, accountCode]
-    );
-
-    if (accountResult.rows[0]) {
-      const accountId = accountResult.rows[0].id;
+    if (glAccountId) {
+      const accountId = glAccountId;
 
       // Counterpart: credit (money in) clears Receivables; debit (money out) clears Payables
       const counterCode = transaction_type === 'credit' ? '1003' : '1004';
@@ -549,10 +574,14 @@ export const syncBankingFromAccounts = async (req, res) => {
       if (bal === 0) continue;
       const accType = row.code === '1001' ? 'cash' : 'bank';
       const accName = row.code === '1001' ? 'Cash at Hand' : 'Bank Account';
+      // Look up the actual GL account record to link it
+      const glAcct = (await client.query(
+        `SELECT id FROM accounts WHERE tenant_id=$1 AND code=$2`, [tenantId, row.code]
+      )).rows[0];
       const acc = await client.query(`
-        INSERT INTO bank_accounts (tenant_id, account_name, account_type, current_balance)
-        VALUES ($1, $2, $3, $4) RETURNING *
-      `, [tenantId, accName, accType, bal]);
+        INSERT INTO bank_accounts (tenant_id, account_name, account_type, current_balance, gl_account_id, gl_account_code)
+        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
+      `, [tenantId, accName, accType, bal, glAcct?.id || null, row.code]);
       created.push(acc.rows[0]);
     }
 

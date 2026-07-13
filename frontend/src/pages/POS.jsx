@@ -206,8 +206,8 @@ export default function POS() {
       <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: '#fdf2f4' }}>
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 w-full max-w-md p-8">
           <div className="text-center mb-8">
-            <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4" style={{ backgroundColor: '#a31b32' }}>
-              🛒
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ backgroundColor: '#a31b32' }}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
             </div>
             <h1 className="text-xl font-bold text-gray-800">Open POS Session</h1>
             <p className="text-sm text-gray-500 mt-1">{company?.name}</p>
@@ -459,7 +459,9 @@ export default function POS() {
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {cart.length === 0 ? (
               <div className="text-center py-12 text-gray-400">
-                <p className="text-4xl mb-2">🛒</p>
+                <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center mx-auto mb-3">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                </div>
                 <p className="text-sm">Cart is empty</p>
                 <p className="text-xs mt-1">Click products to add</p>
               </div>
@@ -584,7 +586,7 @@ export default function POS() {
                       }`}
                       style={paymentForm.payment_method === method ? { backgroundColor: '#a31b32' } : {}}
                     >
-                      {method === 'cash' ? '💵 Cash' : method === 'mpesa' ? '📱 M-Pesa' : '💳 Card'}
+                      {method === 'cash' ? 'Cash' : method === 'mpesa' ? 'M-Pesa' : 'Card'}
                     </button>
                   ))}
                 </div>

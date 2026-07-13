@@ -611,7 +611,7 @@ export default function Cash() {
               <div className="ml-auto flex gap-6 text-sm">
                 <span className="text-green-700 font-semibold">In: KES {txTotals.in.toLocaleString()}</span>
                 <span className="text-red-600 font-semibold">Out: KES {txTotals.out.toLocaleString()}</span>
-                <span className="text-gray-700 font-semibold">Net: KES {(txTotals.in - txTotals.out).toLocaleString()}</span>
+                <span className="text-gray-700 font-semibold">Net: KES {Math.abs(txTotals.in - txTotals.out).toLocaleString()}</span>
               </div>
             </div>
           </div>

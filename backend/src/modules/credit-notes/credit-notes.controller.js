@@ -4,26 +4,38 @@ import { assertPositiveAmount, assertStringLength, AppError, handleError } from 
 // ─── Startup migration ────────────────────────────────────────────────────────
 (async () => {
   try {
+    // Drop old table if it used SERIAL (integer) primary key — system uses UUIDs
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='credit_notes' AND column_name='id' AND data_type='integer'
+        ) THEN
+          DROP TABLE IF EXISTS credit_notes CASCADE;
+        END IF;
+      END $$;
+    `);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS credit_notes (
-        id            SERIAL PRIMARY KEY,
-        tenant_id     INTEGER NOT NULL,
-        reference     VARCHAR(100) NOT NULL,
-        type          VARCHAR(50) NOT NULL,
-        date          DATE NOT NULL DEFAULT CURRENT_DATE,
-        amount        NUMERIC(15,2) NOT NULL DEFAULT 0,
-        description   TEXT,
-        customer_id   INTEGER,
-        supplier_id   INTEGER,
-        invoice_id    INTEGER,
-        bill_id       INTEGER,
-        product_id    INTEGER,
-        quantity      NUMERIC(10,2),
-        bank_account_id INTEGER,
+        id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id       UUID NOT NULL,
+        reference       VARCHAR(100) NOT NULL,
+        type            VARCHAR(50) NOT NULL,
+        date            DATE NOT NULL DEFAULT CURRENT_DATE,
+        amount          NUMERIC(15,2) NOT NULL DEFAULT 0,
+        description     TEXT,
+        customer_id     UUID,
+        supplier_id     UUID,
+        invoice_id      UUID,
+        bill_id         UUID,
+        product_id      UUID,
+        quantity        NUMERIC(10,2),
+        bank_account_id UUID,
         payment_method  VARCHAR(30),
-        status        VARCHAR(20) DEFAULT 'posted',
-        created_by    INTEGER,
-        created_at    TIMESTAMP DEFAULT NOW()
+        status          VARCHAR(20) DEFAULT 'posted',
+        created_by      UUID,
+        created_at      TIMESTAMP DEFAULT NOW()
       )
     `);
   } catch (err) {
@@ -166,7 +178,7 @@ export const createCreditNote = async (req, res) => {
 
     if (type === 'stock_spoilage' && product_id && quantity) {
       await client.query(
-        `UPDATE inventory SET quantity_on_hand = GREATEST(0, quantity_on_hand - $1)
+        `UPDATE stock_levels SET quantity = GREATEST(0, quantity - $1)
          WHERE product_id = $2 AND tenant_id = $3`,
         [Math.round(Number(quantity) * 1000) / 1000, product_id, tenantId]
       );
@@ -309,7 +321,7 @@ export const voidCreditNote = async (req, res) => {
     }
     if (cn.type === 'stock_spoilage' && cn.product_id && cn.quantity) {
       await client.query(
-        `UPDATE inventory SET quantity_on_hand = quantity_on_hand + $1 WHERE product_id=$2 AND tenant_id=$3`,
+        `UPDATE stock_levels SET quantity = quantity + $1 WHERE product_id=$2 AND tenant_id=$3`,
         [Number(cn.quantity), cn.product_id, tenantId]
       );
     }

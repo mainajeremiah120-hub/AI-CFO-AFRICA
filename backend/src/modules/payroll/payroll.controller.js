@@ -1,4 +1,5 @@
 import pool from '../../config/db.js';
+import { logAudit } from '../audit/audit.controller.js';
 
 // ─── EMPLOYEES ───────────────────────────────────────────
 
@@ -296,6 +297,7 @@ export const processPayroll = async (req, res) => {
     );
 
     await client.query('COMMIT');
+    logAudit(req, 'PROCESS', 'payroll', runId, `Processed payroll run for ${run.month}/${run.year}`);
     res.json({ message: 'Payroll processed successfully' });
   } catch (err) {
     await client.query('ROLLBACK');

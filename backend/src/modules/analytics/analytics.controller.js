@@ -343,6 +343,19 @@ export const getDashboardKPIs = async (req, res) => {
       [tenantId]
     );
 
+    const outstandingPayables = await pool.query(
+      `SELECT COALESCE(SUM(balance_due), 0) as total
+       FROM bills WHERE tenant_id = $1 AND status != 'paid'`,
+      [tenantId]
+    );
+
+    const overduePayables = await pool.query(
+      `SELECT COALESCE(SUM(balance_due), 0) as total
+       FROM bills WHERE tenant_id = $1
+       AND status != 'paid' AND due_date < CURRENT_DATE`,
+      [tenantId]
+    );
+
     const monthRevenue = Number(revenue.rows[0].total);
     const monthExpenses = Number(expenses.rows[0].total);
 
@@ -352,6 +365,8 @@ export const getDashboardKPIs = async (req, res) => {
       month_profit: monthRevenue - monthExpenses,
       outstanding_receivables: Number(outstanding.rows[0].total),
       overdue_receivables: Number(overdue.rows[0].total),
+      outstanding_payables: Number(outstandingPayables.rows[0].total),
+      overdue_payables: Number(overduePayables.rows[0].total),
       low_stock_count: Number(lowStock.rows[0].total),
       total_employees: Number(totalEmployees.rows[0].total),
     });

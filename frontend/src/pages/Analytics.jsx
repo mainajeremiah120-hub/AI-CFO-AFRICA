@@ -151,16 +151,13 @@ export default function Analytics() {
           {/* KPI Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             {[
-              { label: 'Revenue This Month', value: formatKES(kpis?.month_revenue || 0), color: '#065f46', icon: '📈' },
-              { label: 'Expenses This Month', value: formatKES(kpis?.month_expenses || 0), color: '#a31b32', icon: '📉' },
-              { label: 'Net Profit This Month', value: formatKES(kpis?.month_profit || 0), color: kpis?.month_profit >= 0 ? '#065f46' : '#a31b32', icon: '💰' },
-              { label: 'Outstanding Receivables', value: formatKES(kpis?.outstanding_receivables || 0), color: '#92400e', icon: '⏳' },
+              { label: 'Revenue This Month', value: formatKES(kpis?.month_revenue || 0), color: '#065f46' },
+              { label: 'Expenses This Month', value: formatKES(kpis?.month_expenses || 0), color: '#a31b32' },
+              { label: 'Net Profit This Month', value: formatKES(kpis?.month_profit || 0), color: kpis?.month_profit >= 0 ? '#065f46' : '#a31b32' },
+              { label: 'Outstanding Receivables', value: formatKES(kpis?.outstanding_receivables || 0), color: '#92400e' },
             ].map((stat) => (
               <div key={stat.label} className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm">
-                <div className="flex justify-between items-start mb-2">
-                  <p className="text-sm text-gray-500">{stat.label}</p>
-                  <span className="text-xl">{stat.icon}</span>
-                </div>
+                <p className="text-sm text-gray-500 mb-2">{stat.label}</p>
                 <p className="text-xl font-bold" style={{ color: stat.color }}>{stat.value}</p>
               </div>
             ))}
